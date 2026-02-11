@@ -1,0 +1,291 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "parsec/v1/jwks.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "JWKSService"
+    },
+    {
+      "name": "TokenExchangeService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/.well-known/jwks.json": {
+      "get": {
+        "summary": "GetJWKS returns the JSON Web Key Set containing all public keys\nfrom all configured issuers. This endpoint is typically used by\nclients to verify signed tokens.",
+        "operationId": "JWKSService_GetJWKS2",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetJWKSResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "JWKSService"
+        ]
+      }
+    },
+    "/v1/jwks.json": {
+      "get": {
+        "summary": "GetJWKS returns the JSON Web Key Set containing all public keys\nfrom all configured issuers. This endpoint is typically used by\nclients to verify signed tokens.",
+        "operationId": "JWKSService_GetJWKS",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetJWKSResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "JWKSService"
+        ]
+      }
+    },
+    "/v1/token": {
+      "post": {
+        "summary": "Exchange performs token exchange according to RFC 8693.\nThe HTTP mapping follows the OAuth 2.0 token endpoint specification.",
+        "operationId": "TokenExchangeService_Exchange",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ExchangeResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1ExchangeRequest"
+            }
+          }
+        ],
+        "tags": [
+          "TokenExchangeService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1ExchangeRequest": {
+      "type": "object",
+      "properties": {
+        "grantType": {
+          "type": "string",
+          "description": "REQUIRED. The value \"urn:ietf:params:oauth:grant-type:token-exchange\"\nindicates that a token exchange is being performed."
+        },
+        "resource": {
+          "type": "string",
+          "description": "OPTIONAL. A URI that indicates the target service or resource where\nthe client intends to use the requested security token."
+        },
+        "audience": {
+          "type": "string",
+          "description": "OPTIONAL. The logical name of the target service where the client\nintends to use the requested security token."
+        },
+        "scope": {
+          "type": "string",
+          "description": "OPTIONAL. A list of space-delimited, case-sensitive strings that\nindicate the desired scope of the requested security token."
+        },
+        "requestedTokenType": {
+          "type": "string",
+          "description": "OPTIONAL. An identifier for the type of the requested security token.\nIf not specified, the default is \"urn:ietf:params:oauth:token-type:access_token\"."
+        },
+        "subjectToken": {
+          "type": "string",
+          "description": "REQUIRED. The security token representing the identity of the party\non behalf of whom the request is being made."
+        },
+        "subjectTokenType": {
+          "type": "string",
+          "description": "REQUIRED. An identifier for the type of the requested security token."
+        },
+        "actorToken": {
+          "type": "string",
+          "description": "OPTIONAL. A security token that represents the identity of the acting\nparty (typically used in delegation scenarios)."
+        },
+        "actorTokenType": {
+          "type": "string",
+          "description": "OPTIONAL. An identifier for the type of the security token in the\nactor_token parameter."
+        },
+        "requestContext": {
+          "type": "string",
+          "description": "OPTIONAL. Base64-encoded JSON object containing request context claims\nthat the client wants to include in the issued token (per transaction\ntoken spec). These claims will be filtered based on the actor's permissions."
+        }
+      },
+      "title": "ExchangeRequest follows RFC 8693 Section 2.1"
+    },
+    "v1ExchangeResponse": {
+      "type": "object",
+      "properties": {
+        "accessToken": {
+          "type": "string",
+          "description": "REQUIRED. The security token issued by the authorization server in\nresponse to the token exchange request."
+        },
+        "issuedTokenType": {
+          "type": "string",
+          "description": "REQUIRED. An identifier for the representation of the issued security\ntoken."
+        },
+        "tokenType": {
+          "type": "string",
+          "description": "REQUIRED. A case-insensitive value specifying the method of using the\naccess token issued. The value is \"Bearer\" for transaction tokens."
+        },
+        "expiresIn": {
+          "type": "string",
+          "format": "int64",
+          "description": "RECOMMENDED. The validity lifetime, in seconds, of the token issued."
+        },
+        "scope": {
+          "type": "string",
+          "description": "OPTIONAL. Scope of the issued security token."
+        },
+        "refreshToken": {
+          "type": "string",
+          "description": "OPTIONAL. A refresh token (typically not issued for transaction tokens)."
+        }
+      },
+      "title": "ExchangeResponse follows RFC 8693 Section 2.2"
+    },
+    "v1GetJWKSResponse": {
+      "type": "object",
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1JSONWebKey"
+          },
+          "description": "keys is an array of JSON Web Keys.\nEach key represents a public key that can be used to verify tokens."
+        }
+      },
+      "description": "GetJWKSResponse contains the JSON Web Key Set per RFC 7517 Section 5."
+    },
+    "v1JSONWebKey": {
+      "type": "object",
+      "properties": {
+        "kty": {
+          "type": "string",
+          "title": "kty (Key Type) identifies the cryptographic algorithm family used with the key.\nCommon values: \"RSA\", \"EC\", \"OKP\""
+        },
+        "use": {
+          "type": "string",
+          "title": "use (Public Key Use) identifies the intended use of the public key.\nCommon values: \"sig\" (signature), \"enc\" (encryption)"
+        },
+        "keyOps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "key_ops (Key Operations) identifies the operation(s) for which the key is intended to be used.\nExamples: \"sign\", \"verify\", \"encrypt\", \"decrypt\""
+        },
+        "alg": {
+          "type": "string",
+          "title": "alg (Algorithm) identifies the algorithm intended for use with the key.\nExamples: \"RS256\", \"ES256\", \"EdDSA\""
+        },
+        "kid": {
+          "type": "string",
+          "description": "kid (Key ID) is used to match a specific key.\nThis is used during key rotation to identify which key was used to sign a token."
+        },
+        "x5u": {
+          "type": "string",
+          "description": "x5u (X.509 URL) is a URI that refers to a resource for an X.509 public key certificate or certificate chain."
+        },
+        "x5c": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "x5c (X.509 Certificate Chain) contains a chain of one or more PKIX certificates."
+        },
+        "x5t": {
+          "type": "string",
+          "description": "x5t (X.509 Certificate SHA-1 Thumbprint) is a base64url-encoded SHA-1 thumbprint of the DER encoding of an X.509 certificate."
+        },
+        "x5tS256": {
+          "type": "string",
+          "description": "x5t_s256 (X.509 Certificate SHA-256 Thumbprint) is a base64url-encoded SHA-256 thumbprint of the DER encoding of an X.509 certificate."
+        },
+        "n": {
+          "type": "string",
+          "title": "Key-specific parameters (RSA)\nn (Modulus) - RSA public key modulus"
+        },
+        "e": {
+          "type": "string",
+          "title": "e (Exponent) - RSA public key exponent"
+        },
+        "crv": {
+          "type": "string",
+          "title": "Key-specific parameters (Elliptic Curve)\ncrv (Curve) - EC curve name"
+        },
+        "x": {
+          "type": "string",
+          "title": "x (X Coordinate) - EC public key x coordinate"
+        },
+        "y": {
+          "type": "string",
+          "title": "y (Y Coordinate) - EC public key y coordinate"
+        }
+      },
+      "description": "JSONWebKey represents a single public key per RFC 7517 Section 4."
+    }
+  }
+}

@@ -17,8 +17,6 @@ coverage.txt
 # Go workspace file
 go.work
 
-# Generated files
-/api/gen/
 
 # IDE
 .idea/
