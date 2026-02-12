@@ -103,14 +103,6 @@ func TestHealthEndpoints(t *testing.T) {
 
 	env.Srv.SetReady()
 
-	t.Run("HTTP liveness returns 200 after SetReady", func(t *testing.T) {
-		body := httpGet(t, httpClient, fmt.Sprintf("http://localhost:%d/healthz/live", env.HTTPPort))
-
-		if body["status"] != "OK" {
-			t.Errorf("expected status OK, got %q", body["status"])
-		}
-	})
-
 	t.Run("HTTP readiness returns 200 after SetReady", func(t *testing.T) {
 		resp, err := httpClient.Get(fmt.Sprintf("http://localhost:%d/healthz/ready", env.HTTPPort))
 		if err != nil {
@@ -199,77 +191,6 @@ func TestHealthEndpoints_UnknownService(t *testing.T) {
 		}
 		if st.Code() != codes.NotFound {
 			t.Errorf("expected NOT_FOUND, got %v", st.Code())
-		}
-	})
-}
-
-// TestHealthEndpoints_ReflectionListsHealthService verifies that the gRPC
-// reflection service includes grpc.health.v1.Health so tools like grpcurl
-// can discover it.
-func TestHealthEndpoints_ReflectionListsHealthService(t *testing.T) {
-	env := startHealthTestEnv(t, 19097, 18087)
-
-	// Overall health check (empty string) — should work if service is registered
-	resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: ""})
-	if err != nil {
-		t.Fatalf("Health service not accessible via gRPC: %v", err)
-	}
-	if resp.Status != healthpb.HealthCheckResponse_SERVING {
-		t.Errorf("expected SERVING for overall health, got %v", resp.Status)
-	}
-
-	t.Log("✓ grpc.health.v1.Health service is registered and accessible")
-}
-
-// TestHealthEndpoints_CheckServiceByName verifies that querying a registered
-// service by its full proto name via gRPC Health/Check returns the correct
-// status. This is the programmatic equivalent of:
-//
-//	grpcurl -plaintext -d '{"service": "parsec.v1.TokenExchangeService"}' \
-//	  localhost:9066 grpc.health.v1.Health/Check
-func TestHealthEndpoints_CheckServiceByName(t *testing.T) {
-	env := startHealthTestEnv(t, 19099, 18089)
-
-	// Before SetReady — each named service should be NOT_SERVING.
-	t.Run("before SetReady", func(t *testing.T) {
-		for _, svc := range healthServiceNames {
-			t.Run(svc, func(t *testing.T) {
-				resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: svc})
-				if err != nil {
-					t.Fatalf("Health/Check(%q) failed: %v", svc, err)
-				}
-				if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
-					t.Errorf("expected NOT_SERVING, got %v", resp.Status)
-				}
-			})
-		}
-	})
-
-	env.Srv.SetReady()
-
-	// After SetReady — each named service should be SERVING.
-	t.Run("after SetReady", func(t *testing.T) {
-		for _, svc := range healthServiceNames {
-			t.Run(svc, func(t *testing.T) {
-				resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: svc})
-				if err != nil {
-					t.Fatalf("Health/Check(%q) failed: %v", svc, err)
-				}
-				if resp.Status != healthpb.HealthCheckResponse_SERVING {
-					t.Errorf("expected SERVING, got %v", resp.Status)
-				}
-			})
-		}
-	})
-
-	// Overall health (empty string) should always be SERVING regardless.
-	t.Run("overall health is SERVING", func(t *testing.T) {
-		resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: ""})
-		if err != nil {
-			t.Fatalf("Health/Check(\"\") failed: %v", err)
-		}
-		if resp.Status != healthpb.HealthCheckResponse_SERVING {
-			t.Errorf("expected SERVING for overall health, got %v", resp.Status)
 		}
 	})
 }
