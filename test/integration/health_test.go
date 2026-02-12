@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,8 +17,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/project-kessel/parsec/internal/server"
-	"github.com/project-kessel/parsec/internal/service"
-	"github.com/project-kessel/parsec/internal/trust"
 )
 
 // healthServiceNames mirrors the per-service names registered by the server.
@@ -36,48 +35,16 @@ var healthServiceNames = []string{
 // Subtests run sequentially and share one server, following the same pattern
 // as TestJWKSEndpoint.
 func TestHealthEndpoints(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Setup minimal dependencies (health checks don't need real validators/issuers)
-	trustStore, tokenService, issuerRegistry := setupTestDependencies()
-	claimsFilterRegistry := server.NewStubClaimsFilterRegistry()
-
-	srv := server.New(server.Config{
-		GRPCPort:       19095,
-		HTTPPort:       18085,
-		AuthzServer:    server.NewAuthzServer(trustStore, tokenService, nil, nil),
-		ExchangeServer: server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
-	})
-
-	if err := srv.Start(ctx); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
-	defer func() { _ = srv.Stop(ctx) }()
-
-	waitForServer(t, 18085, 5*time.Second)
+	env := startHealthTestEnv(t, 19095, 18085)
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
-
-	// Dial a gRPC connection for health checks
-	grpcConn, err := grpc.NewClient(
-		"localhost:19095",
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("Failed to dial gRPC: %v", err)
-	}
-	defer func() { _ = grpcConn.Close() }()
-
-	healthClient := healthpb.NewHealthClient(grpcConn)
 
 	// ================================================================
 	// Phase 1: Before SetReady — services are NOT_SERVING
 	// ================================================================
 
 	t.Run("HTTP liveness returns 200 before SetReady", func(t *testing.T) {
-		body := httpGet(t, httpClient, "http://localhost:18085/healthz/live")
+		body := httpGet(t, httpClient, fmt.Sprintf("http://localhost:%d/healthz/live", env.HTTPPort))
 
 		if body["status"] != "OK" {
 			t.Errorf("expected status OK, got %q", body["status"])
@@ -85,7 +52,7 @@ func TestHealthEndpoints(t *testing.T) {
 	})
 
 	t.Run("HTTP readiness returns 503 before SetReady", func(t *testing.T) {
-		resp, err := httpClient.Get("http://localhost:18085/healthz/ready")
+		resp, err := httpClient.Get(fmt.Sprintf("http://localhost:%d/healthz/ready", env.HTTPPort))
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -107,7 +74,7 @@ func TestHealthEndpoints(t *testing.T) {
 
 	t.Run("gRPC overall health returns SERVING (liveness)", func(t *testing.T) {
 		// The empty string "" is the overall server health (set to SERVING by default).
-		resp, err := healthClient.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
+		resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: ""})
 		if err != nil {
 			t.Fatalf("Health/Check failed: %v", err)
 		}
@@ -119,7 +86,7 @@ func TestHealthEndpoints(t *testing.T) {
 	t.Run("gRPC per-service health returns NOT_SERVING before SetReady", func(t *testing.T) {
 		for _, svc := range healthServiceNames {
 			t.Run(svc, func(t *testing.T) {
-				resp, err := healthClient.Check(ctx, &healthpb.HealthCheckRequest{Service: svc})
+				resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: svc})
 				if err != nil {
 					t.Fatalf("Health/Check(%q) failed: %v", svc, err)
 				}
@@ -134,10 +101,10 @@ func TestHealthEndpoints(t *testing.T) {
 	// Phase 2: After SetReady — all services SERVING
 	// ================================================================
 
-	srv.SetReady()
+	env.Srv.SetReady()
 
 	t.Run("HTTP liveness returns 200 after SetReady", func(t *testing.T) {
-		body := httpGet(t, httpClient, "http://localhost:18085/healthz/live")
+		body := httpGet(t, httpClient, fmt.Sprintf("http://localhost:%d/healthz/live", env.HTTPPort))
 
 		if body["status"] != "OK" {
 			t.Errorf("expected status OK, got %q", body["status"])
@@ -145,7 +112,7 @@ func TestHealthEndpoints(t *testing.T) {
 	})
 
 	t.Run("HTTP readiness returns 200 after SetReady", func(t *testing.T) {
-		resp, err := httpClient.Get("http://localhost:18085/healthz/ready")
+		resp, err := httpClient.Get(fmt.Sprintf("http://localhost:%d/healthz/ready", env.HTTPPort))
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -164,7 +131,7 @@ func TestHealthEndpoints(t *testing.T) {
 	t.Run("gRPC per-service health returns SERVING after SetReady", func(t *testing.T) {
 		for _, svc := range healthServiceNames {
 			t.Run(svc, func(t *testing.T) {
-				resp, err := healthClient.Check(ctx, &healthpb.HealthCheckRequest{Service: svc})
+				resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: svc})
 				if err != nil {
 					t.Fatalf("Health/Check(%q) failed: %v", svc, err)
 				}
@@ -179,10 +146,10 @@ func TestHealthEndpoints(t *testing.T) {
 	// Phase 3: After SetNotReady — simulates degraded state
 	// ================================================================
 
-	srv.SetNotReady()
+	env.Srv.SetNotReady()
 
 	t.Run("HTTP readiness returns 503 after SetNotReady", func(t *testing.T) {
-		resp, err := httpClient.Get("http://localhost:18085/healthz/ready")
+		resp, err := httpClient.Get(fmt.Sprintf("http://localhost:%d/healthz/ready", env.HTTPPort))
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -201,7 +168,7 @@ func TestHealthEndpoints(t *testing.T) {
 	t.Run("gRPC per-service health returns NOT_SERVING after SetNotReady", func(t *testing.T) {
 		for _, svc := range healthServiceNames {
 			t.Run(svc, func(t *testing.T) {
-				resp, err := healthClient.Check(ctx, &healthpb.HealthCheckRequest{Service: svc})
+				resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: svc})
 				if err != nil {
 					t.Fatalf("Health/Check(%q) failed: %v", svc, err)
 				}
@@ -216,40 +183,10 @@ func TestHealthEndpoints(t *testing.T) {
 // TestHealthEndpoints_UnknownService verifies that querying an unregistered
 // service returns gRPC NOT_FOUND, per the gRPC Health Checking Protocol spec.
 func TestHealthEndpoints_UnknownService(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	trustStore, tokenService, issuerRegistry := setupTestDependencies()
-	claimsFilterRegistry := server.NewStubClaimsFilterRegistry()
-
-	srv := server.New(server.Config{
-		GRPCPort:       19096,
-		HTTPPort:       18086,
-		AuthzServer:    server.NewAuthzServer(trustStore, tokenService, nil, nil),
-		ExchangeServer: server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
-	})
-
-	if err := srv.Start(ctx); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
-	defer func() { _ = srv.Stop(ctx) }()
-
-	waitForServer(t, 18086, 5*time.Second)
-
-	grpcConn, err := grpc.NewClient(
-		"localhost:19096",
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("Failed to dial gRPC: %v", err)
-	}
-	defer func() { _ = grpcConn.Close() }()
-
-	healthClient := healthpb.NewHealthClient(grpcConn)
+	env := startHealthTestEnv(t, 19096, 18086)
 
 	t.Run("gRPC health check for unknown service returns NOT_FOUND", func(t *testing.T) {
-		_, err := healthClient.Check(ctx, &healthpb.HealthCheckRequest{
+		_, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{
 			Service: "nonexistent.UnknownService",
 		})
 		if err == nil {
@@ -270,48 +207,10 @@ func TestHealthEndpoints_UnknownService(t *testing.T) {
 // reflection service includes grpc.health.v1.Health so tools like grpcurl
 // can discover it.
 func TestHealthEndpoints_ReflectionListsHealthService(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	trustStore := trust.NewStubStore()
-	stubValidator := trust.NewStubValidator(trust.CredentialTypeBearer)
-	trustStore.AddValidator(stubValidator)
-
-	issuerRegistry := service.NewSimpleRegistry()
-	dataSourceRegistry := service.NewDataSourceRegistry()
-	tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
-	claimsFilterRegistry := server.NewStubClaimsFilterRegistry()
-
-	srv := server.New(server.Config{
-		GRPCPort:       19097,
-		HTTPPort:       18087,
-		AuthzServer:    server.NewAuthzServer(trustStore, tokenService, nil, nil),
-		ExchangeServer: server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
-	})
-
-	if err := srv.Start(ctx); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
-	defer func() { _ = srv.Stop(ctx) }()
-
-	waitForServer(t, 18087, 5*time.Second)
-
-	grpcConn, err := grpc.NewClient(
-		"localhost:19097",
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("Failed to dial gRPC: %v", err)
-	}
-	defer func() { _ = grpcConn.Close() }()
-
-	// Use the health client to verify the health service is accessible
-	// (this implicitly proves the service is registered on the gRPC server)
-	healthClient := healthpb.NewHealthClient(grpcConn)
+	env := startHealthTestEnv(t, 19097, 18087)
 
 	// Overall health check (empty string) — should work if service is registered
-	resp, err := healthClient.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
+	resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: ""})
 	if err != nil {
 		t.Fatalf("Health service not accessible via gRPC: %v", err)
 	}
@@ -322,49 +221,72 @@ func TestHealthEndpoints_ReflectionListsHealthService(t *testing.T) {
 	t.Log("✓ grpc.health.v1.Health service is registered and accessible")
 }
 
+// TestHealthEndpoints_CheckServiceByName verifies that querying a registered
+// service by its full proto name via gRPC Health/Check returns the correct
+// status. This is the programmatic equivalent of:
+//
+//	grpcurl -plaintext -d '{"service": "parsec.v1.TokenExchangeService"}' \
+//	  localhost:9066 grpc.health.v1.Health/Check
+func TestHealthEndpoints_CheckServiceByName(t *testing.T) {
+	env := startHealthTestEnv(t, 19099, 18089)
+
+	// Before SetReady — each named service should be NOT_SERVING.
+	t.Run("before SetReady", func(t *testing.T) {
+		for _, svc := range healthServiceNames {
+			t.Run(svc, func(t *testing.T) {
+				resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: svc})
+				if err != nil {
+					t.Fatalf("Health/Check(%q) failed: %v", svc, err)
+				}
+				if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
+					t.Errorf("expected NOT_SERVING, got %v", resp.Status)
+				}
+			})
+		}
+	})
+
+	env.Srv.SetReady()
+
+	// After SetReady — each named service should be SERVING.
+	t.Run("after SetReady", func(t *testing.T) {
+		for _, svc := range healthServiceNames {
+			t.Run(svc, func(t *testing.T) {
+				resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: svc})
+				if err != nil {
+					t.Fatalf("Health/Check(%q) failed: %v", svc, err)
+				}
+				if resp.Status != healthpb.HealthCheckResponse_SERVING {
+					t.Errorf("expected SERVING, got %v", resp.Status)
+				}
+			})
+		}
+	})
+
+	// Overall health (empty string) should always be SERVING regardless.
+	t.Run("overall health is SERVING", func(t *testing.T) {
+		resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: ""})
+		if err != nil {
+			t.Fatalf("Health/Check(\"\") failed: %v", err)
+		}
+		if resp.Status != healthpb.HealthCheckResponse_SERVING {
+			t.Errorf("expected SERVING for overall health, got %v", resp.Status)
+		}
+	})
+}
+
 // TestHealthEndpoints_WatchStream verifies that the gRPC Watch RPC delivers
 // real-time status updates when health transitions occur, as specified by
 // https://github.com/grpc/grpc/blob/master/doc/health-checking.md
 func TestHealthEndpoints_WatchStream(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	trustStore, tokenService, issuerRegistry := setupTestDependencies()
-	claimsFilterRegistry := server.NewStubClaimsFilterRegistry()
-
-	srv := server.New(server.Config{
-		GRPCPort:       19098,
-		HTTPPort:       18088,
-		AuthzServer:    server.NewAuthzServer(trustStore, tokenService, nil, nil),
-		ExchangeServer: server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
-	})
-
-	if err := srv.Start(ctx); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
-	defer func() { _ = srv.Stop(ctx) }()
-
-	waitForServer(t, 18088, 5*time.Second)
-
-	grpcConn, err := grpc.NewClient(
-		"localhost:19098",
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("Failed to dial gRPC: %v", err)
-	}
-	defer func() { _ = grpcConn.Close() }()
-
-	healthClient := healthpb.NewHealthClient(grpcConn)
+	env := startHealthTestEnv(t, 19098, 18088)
 
 	// Pick one service to watch (the protocol works the same for all).
 	const watchedService = "parsec.v1.TokenExchangeService"
 
-	watchCtx, watchCancel := context.WithTimeout(ctx, 10*time.Second)
+	watchCtx, watchCancel := context.WithTimeout(env.Ctx, 10*time.Second)
 	defer watchCancel()
 
-	stream, err := healthClient.Watch(watchCtx, &healthpb.HealthCheckRequest{
+	stream, err := env.HealthClient.Watch(watchCtx, &healthpb.HealthCheckRequest{
 		Service: watchedService,
 	})
 	if err != nil {
@@ -384,7 +306,7 @@ func TestHealthEndpoints_WatchStream(t *testing.T) {
 	})
 
 	// Transition to ready — the stream should deliver a SERVING update.
-	srv.SetReady()
+	env.Srv.SetReady()
 
 	t.Run("Watch delivers SERVING after SetReady", func(t *testing.T) {
 		resp, err := stream.Recv()
@@ -397,7 +319,7 @@ func TestHealthEndpoints_WatchStream(t *testing.T) {
 	})
 
 	// Transition back to not-ready — the stream should deliver NOT_SERVING.
-	srv.SetNotReady()
+	env.Srv.SetNotReady()
 
 	t.Run("Watch delivers NOT_SERVING after SetNotReady", func(t *testing.T) {
 		resp, err := stream.Recv()
@@ -411,6 +333,64 @@ func TestHealthEndpoints_WatchStream(t *testing.T) {
 }
 
 // --- test helpers ---
+
+// healthTestEnv bundles a running server, gRPC health client, and HTTP port
+// for health endpoint integration tests.
+type healthTestEnv struct {
+	Ctx          context.Context
+	Srv          *server.Server
+	HealthClient healthpb.HealthClient
+	HTTPPort     int
+}
+
+// startHealthTestEnv creates dependencies, starts a server on the given ports,
+// waits for it to be ready, dials a gRPC health client, and registers cleanup
+// via t.Cleanup. Every health integration test uses this as its first line.
+func startHealthTestEnv(t *testing.T, grpcPort, httpPort int) *healthTestEnv {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	trustStore, tokenService, issuerRegistry := setupTestDependencies()
+	claimsFilterRegistry := server.NewStubClaimsFilterRegistry()
+
+	srv := server.New(server.Config{
+		GRPCPort:       grpcPort,
+		HTTPPort:       httpPort,
+		AuthzServer:    server.NewAuthzServer(trustStore, tokenService, nil, nil),
+		ExchangeServer: server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
+		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
+	})
+
+	if err := srv.Start(ctx); err != nil {
+		cancel()
+		t.Fatalf("Failed to start server on :%d/:%d: %v", grpcPort, httpPort, err)
+	}
+
+	waitForServer(t, httpPort, 5*time.Second)
+
+	grpcConn, err := grpc.NewClient(
+		fmt.Sprintf("localhost:%d", grpcPort),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		cancel()
+		t.Fatalf("Failed to dial gRPC on :%d: %v", grpcPort, err)
+	}
+
+	t.Cleanup(func() {
+		_ = grpcConn.Close()
+		_ = srv.Stop(ctx)
+		cancel()
+	})
+
+	return &healthTestEnv{
+		Ctx:          ctx,
+		Srv:          srv,
+		HealthClient: healthpb.NewHealthClient(grpcConn),
+		HTTPPort:     httpPort,
+	}
+}
 
 // httpGet performs a GET request and returns the parsed JSON body.
 // It asserts status 200.

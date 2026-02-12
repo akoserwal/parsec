@@ -14,21 +14,8 @@ func TestHandleLiveness(t *testing.T) {
 	srv := newHealthTestServer()
 
 	t.Run("always returns 200 OK", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/healthz/live", nil)
-		rec := httptest.NewRecorder()
-		srv.handleLiveness(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d", rec.Code)
-		}
-
-		var body map[string]string
-		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-			t.Fatalf("failed to decode body: %v", err)
-		}
-		if body["status"] != "OK" {
-			t.Errorf("expected status OK, got %q", body["status"])
-		}
+		rec := checkLiveness(t, srv)
+		assertHealthResponse(t, rec, http.StatusOK, "OK")
 	})
 }
 
@@ -38,30 +25,15 @@ func TestHandleReadiness(t *testing.T) {
 		srv.SetReady()
 
 		rec := checkReadiness(t, srv)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d", rec.Code)
-		}
-
-		body := decodeBody(t, rec)
-		if body["status"] != "SERVING" {
-			t.Errorf("expected status SERVING, got %q", body["status"])
-		}
+		assertHealthResponse(t, rec, http.StatusOK, "SERVING")
 	})
 
 	t.Run("returns 503 when no services are SERVING", func(t *testing.T) {
 		srv := newHealthTestServer() // all start as NOT_SERVING
 
 		rec := checkReadiness(t, srv)
+		body := assertHealthResponse(t, rec, http.StatusServiceUnavailable, "NOT_SERVING")
 
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Fatalf("expected 503, got %d", rec.Code)
-		}
-
-		body := decodeBody(t, rec)
-		if body["status"] != "NOT_SERVING" {
-			t.Errorf("expected status NOT_SERVING, got %q", body["status"])
-		}
 		// The first service in the list should be reported.
 		if body["service"] != healthServices[0] {
 			t.Errorf("expected service %q, got %q", healthServices[0], body["service"])
@@ -78,15 +50,8 @@ func TestHandleReadiness(t *testing.T) {
 				srv.healthServer.SetServingStatus(failing, healthpb.HealthCheckResponse_NOT_SERVING)
 
 				rec := checkReadiness(t, srv)
+				body := assertHealthResponse(t, rec, http.StatusServiceUnavailable, "NOT_SERVING")
 
-				if rec.Code != http.StatusServiceUnavailable {
-					t.Fatalf("expected 503, got %d", rec.Code)
-				}
-
-				body := decodeBody(t, rec)
-				if body["status"] != "NOT_SERVING" {
-					t.Errorf("expected status NOT_SERVING, got %q", body["status"])
-				}
 				if body["service"] != failing {
 					t.Errorf("expected failing service %q, got %q", failing, body["service"])
 				}
@@ -102,15 +67,7 @@ func TestHandleReadiness(t *testing.T) {
 		srv.healthServer.Shutdown()
 
 		rec := checkReadiness(t, srv)
-
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Fatalf("expected 503 after shutdown, got %d", rec.Code)
-		}
-
-		body := decodeBody(t, rec)
-		if body["status"] != "NOT_SERVING" {
-			t.Errorf("expected status NOT_SERVING, got %q", body["status"])
-		}
+		assertHealthResponse(t, rec, http.StatusServiceUnavailable, "NOT_SERVING")
 	})
 }
 
@@ -127,6 +84,15 @@ func newHealthTestServer() *Server {
 	return &Server{healthServer: hs}
 }
 
+// checkLiveness calls handleLiveness and returns the recorded response.
+func checkLiveness(t *testing.T, srv *Server) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/healthz/live", nil)
+	rec := httptest.NewRecorder()
+	srv.handleLiveness(rec, req)
+	return rec
+}
+
 // checkReadiness calls handleReadiness and returns the recorded response.
 func checkReadiness(t *testing.T, srv *Server) *httptest.ResponseRecorder {
 	t.Helper()
@@ -136,12 +102,24 @@ func checkReadiness(t *testing.T, srv *Server) *httptest.ResponseRecorder {
 	return rec
 }
 
-// decodeBody decodes the JSON response body into a map.
-func decodeBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]string {
+// assertHealthResponse checks the HTTP status code and the "status" field in
+// the JSON body. It returns the decoded body for further assertions (e.g.
+// checking the "service" field).
+func assertHealthResponse(t *testing.T, rec *httptest.ResponseRecorder, wantCode int, wantStatus string) map[string]string {
 	t.Helper()
+
+	if rec.Code != wantCode {
+		t.Fatalf("expected HTTP %d, got %d", wantCode, rec.Code)
+	}
+
 	var body map[string]string
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("failed to decode body: %v", err)
 	}
+
+	if body["status"] != wantStatus {
+		t.Errorf("expected status %q, got %q", wantStatus, body["status"])
+	}
+
 	return body
 }
