@@ -1,6 +1,6 @@
 version: v2
 modules:
-  - path: api/proto
+  - path: .
     name: buf.build/project-kessel/parsec
 deps:
   - buf.build/googleapis/googleapis
