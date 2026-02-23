@@ -1,7 +1,7 @@
 version: v2
 modules:
   - path: api/proto
-  name: buf.build/project-kessel/parsec
+    name: buf.build/project-kessel/parsec
 deps:
   - buf.build/googleapis/googleapis
 lint:
