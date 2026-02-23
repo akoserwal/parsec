@@ -1,19 +1,19 @@
 version: v2
 plugins:
   - remote: buf.build/protocolbuffers/go
-    out: api/gen
+    out: gen/
     opt:
       - paths=source_relative
   - remote: buf.build/grpc/go
-    out: api/gen
+    out: gen/
     opt:
       - paths=source_relative
   - remote: buf.build/grpc-ecosystem/gateway
-    out: api/gen
+    out: gen/
     opt:
       - paths=source_relative
   - remote: buf.build/grpc-ecosystem/openapiv2
-    out: api/gen
+    out: gen/
     opt:
       - allow_merge=true
       - merge_file_name=parsec
