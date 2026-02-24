@@ -116,7 +116,7 @@ func (s *Server) Start(ctx context.Context) error {
 		s.grpcDialOptions...,
 	)
 
-	endpoint := "passthrough:///" + s.grpcListener.Addr().String()
+	endpoint := grpcDialEndpoint(s.grpcListener.Addr().String())
 	if err := parsecv1.RegisterTokenExchangeServiceHandlerFromEndpoint(ctx, gwMux, endpoint, opts); err != nil {
 		return fmt.Errorf("failed to register token exchange handler: %w", err)
 	}
@@ -185,6 +185,25 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// grpcDialEndpoint builds a passthrough:/// endpoint suitable for grpc-gateway
+// to dial. If the listener is bound to a wildcard address (0.0.0.0, [::], or
+// empty host), it is replaced with the corresponding loopback address so the
+// connection targets a dialable address. Non-TCP transports (e.g. bufconn)
+// whose addresses aren't in host:port form are used as-is.
+func grpcDialEndpoint(listenAddr string) string {
+	host, port, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		return "passthrough:///" + listenAddr
+	}
+	switch host {
+	case "", "0.0.0.0":
+		host = "127.0.0.1"
+	case "::":
+		host = "::1"
+	}
+	return "passthrough:///" + net.JoinHostPort(host, port)
 }
 
 // handleLiveness is the HTTP liveness probe handler.
