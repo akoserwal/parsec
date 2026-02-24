@@ -1,6 +1,38 @@
 package server
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"google.golang.org/grpc/test/bufconn"
+)
+
+func TestStartRejectsNilGRPCListener(t *testing.T) {
+	srv := New(stubServerConfig())
+	err := srv.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected error when gRPC listener is nil")
+	}
+	if !strings.Contains(err.Error(), "missing gRPC listener") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestStartRejectsNilHTTPListener(t *testing.T) {
+	cfg := stubServerConfig()
+	cfg.GRPCListener = bufconn.Listen(bufconnSize)
+	defer func() { _ = cfg.GRPCListener.Close() }()
+
+	srv := New(cfg)
+	err := srv.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected error when HTTP listener is nil")
+	}
+	if !strings.Contains(err.Error(), "missing HTTP listener") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
 
 func TestGrpcDialEndpoint(t *testing.T) {
 	tests := []struct {

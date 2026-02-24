@@ -78,6 +78,13 @@ func New(cfg Config) *Server {
 
 // Start starts both the gRPC and HTTP servers
 func (s *Server) Start(ctx context.Context) error {
+	if s.grpcListener == nil {
+		return fmt.Errorf("missing gRPC listener")
+	}
+	if s.httpListener == nil {
+		return fmt.Errorf("missing HTTP listener")
+	}
+
 	// Create gRPC server
 	s.grpcServer = grpc.NewServer()
 
