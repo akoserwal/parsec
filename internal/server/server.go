@@ -104,13 +104,6 @@ func (s *Server) Start(ctx context.Context) error {
 	// Register reflection service for grpcurl and other tools
 	reflection.Register(s.grpcServer)
 
-	// Start gRPC server on the provided listener
-	go func() {
-		if err := s.grpcServer.Serve(s.grpcListener); err != nil {
-			fmt.Printf("gRPC server error: %v\n", err)
-		}
-	}()
-
 	// Create HTTP server with grpc-gateway.
 	// Use passthrough resolver so the address is used as-is (works for both
 	// TCP addresses and in-memory transports like bufconn).
@@ -136,9 +129,15 @@ func (s *Server) Start(ctx context.Context) error {
 	httpMux.HandleFunc("GET /healthz/ready", s.handleReadiness)
 	httpMux.Handle("/", gwMux)
 
-	// Start HTTP server on the provided listener
 	s.httpServer = &http.Server{Handler: httpMux}
 
+	// All fallible setup is complete. Launch the serve goroutines last so
+	// that an early-return error never orphans a running goroutine.
+	go func() {
+		if err := s.grpcServer.Serve(s.grpcListener); err != nil {
+			fmt.Printf("gRPC server error: %v\n", err)
+		}
+	}()
 	go func() {
 		if err := s.httpServer.Serve(s.httpListener); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("HTTP server error: %v\n", err)

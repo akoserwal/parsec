@@ -41,7 +41,10 @@ func startTestServer(t *testing.T, cfg Config) *testEnv {
 	t.Helper()
 
 	grpcBuf := bufconn.Listen(bufconnSize)
+	t.Cleanup(func() { _ = grpcBuf.Close() })
+
 	httpBuf := bufconn.Listen(bufconnSize)
+	t.Cleanup(func() { _ = httpBuf.Close() })
 
 	cfg.GRPCListener = grpcBuf
 	cfg.HTTPListener = httpBuf

@@ -138,10 +138,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to listen on gRPC port %d: %w", provider.GRPCPort(), err)
 	}
+	defer grpcListener.Close()
+
 	httpListener, err := net.Listen("tcp", fmt.Sprintf(":%d", provider.HTTPPort()))
 	if err != nil {
 		return fmt.Errorf("failed to listen on HTTP port %d: %w", provider.HTTPPort(), err)
 	}
+	defer httpListener.Close()
 
 	// 8. Create and start server
 	srv := server.New(server.Config{
