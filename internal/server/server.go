@@ -92,9 +92,10 @@ func (s *Server) Start(ctx context.Context) error {
 	healthpb.RegisterHealthServer(s.grpcServer, s.healthServer)
 
 	// Per the spec, register all services manually including the empty string
-	// for overall server health (liveness). The empty string stays SERVING for
-	// the lifetime of the process; per-service and readiness statuses start as
-	// NOT_SERVING until SetReady() is called after all components are initialized.
+	// for overall server health (liveness). The empty string is set to SERVING
+	// immediately and remains so until Shutdown() is called during Stop(),
+	// which sets every service to NOT_SERVING. Per-service and readiness
+	// statuses start as NOT_SERVING until SetReady() is called.
 	s.healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 	s.healthServer.SetServingStatus(healthReadinessService, healthpb.HealthCheckResponse_NOT_SERVING)
 	for _, svc := range healthServices {
