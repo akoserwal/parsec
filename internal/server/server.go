@@ -18,6 +18,12 @@ import (
 	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
 )
 
+// healthReadinessService is the aggregate readiness key for Kubernetes gRPC
+// readiness probes. It transitions to SERVING only when all application
+// services are ready, and back to NOT_SERVING when any become unready.
+// See: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-a-grpc-liveness-probe
+const healthReadinessService = "readiness"
+
 // healthServices lists the full proto service names registered on the gRPC server.
 // Per the gRPC Health Checking Protocol, each service is registered individually
 // in the health server so clients can query per-service health status.
@@ -74,11 +80,15 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Register standard gRPC health checking service (grpc.health.v1.Health).
 	// See: https://github.com/grpc/grpc/blob/master/doc/health-checking.md
-	// The empty string "" is set to SERVING by default (overall server health / liveness).
 	s.healthServer = health.NewServer()
 	healthpb.RegisterHealthServer(s.grpcServer, s.healthServer)
 
-	// Register per-service health status — initially NOT_SERVING until SetReady() is called.
+	// Per the spec, register all services manually including the empty string
+	// for overall server health (liveness). The empty string stays SERVING for
+	// the lifetime of the process; per-service and readiness statuses start as
+	// NOT_SERVING until SetReady() is called after all components are initialized.
+	s.healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+	s.healthServer.SetServingStatus(healthReadinessService, healthpb.HealthCheckResponse_NOT_SERVING)
 	for _, svc := range healthServices {
 		s.healthServer.SetServingStatus(svc, healthpb.HealthCheckResponse_NOT_SERVING)
 	}
@@ -137,19 +147,23 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
-// SetReady transitions all per-service health statuses to SERVING.
-// Call this after all components have been successfully initialized.
+// SetReady transitions all per-service and the aggregate readiness
+// health statuses to SERVING. Call this after all components have been
+// successfully initialized.
 func (s *Server) SetReady() {
 	for _, svc := range healthServices {
 		s.healthServer.SetServingStatus(svc, healthpb.HealthCheckResponse_SERVING)
 	}
+	s.healthServer.SetServingStatus(healthReadinessService, healthpb.HealthCheckResponse_SERVING)
 }
 
-// SetNotReady transitions all per-service health statuses to NOT_SERVING.
+// SetNotReady transitions all per-service and the aggregate readiness
+// health statuses to NOT_SERVING.
 func (s *Server) SetNotReady() {
 	for _, svc := range healthServices {
 		s.healthServer.SetServingStatus(svc, healthpb.HealthCheckResponse_NOT_SERVING)
 	}
+	s.healthServer.SetServingStatus(healthReadinessService, healthpb.HealthCheckResponse_NOT_SERVING)
 }
 
 // Stop gracefully stops both servers

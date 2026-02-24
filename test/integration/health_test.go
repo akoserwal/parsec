@@ -97,6 +97,16 @@ func TestHealthEndpoints(t *testing.T) {
 		}
 	})
 
+	t.Run("gRPC readiness key returns NOT_SERVING before SetReady", func(t *testing.T) {
+		resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: "readiness"})
+		if err != nil {
+			t.Fatalf("Health/Check(readiness) failed: %v", err)
+		}
+		if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
+			t.Errorf("expected NOT_SERVING, got %v", resp.Status)
+		}
+	})
+
 	// ================================================================
 	// Phase 2: After SetReady — all services SERVING
 	// ================================================================
@@ -134,6 +144,16 @@ func TestHealthEndpoints(t *testing.T) {
 		}
 	})
 
+	t.Run("gRPC readiness key returns SERVING after SetReady", func(t *testing.T) {
+		resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: "readiness"})
+		if err != nil {
+			t.Fatalf("Health/Check(readiness) failed: %v", err)
+		}
+		if resp.Status != healthpb.HealthCheckResponse_SERVING {
+			t.Errorf("expected SERVING, got %v", resp.Status)
+		}
+	})
+
 	// ================================================================
 	// Phase 3: After SetNotReady — simulates degraded state
 	// ================================================================
@@ -168,6 +188,16 @@ func TestHealthEndpoints(t *testing.T) {
 					t.Errorf("expected NOT_SERVING, got %v", resp.Status)
 				}
 			})
+		}
+	})
+
+	t.Run("gRPC readiness key returns NOT_SERVING after SetNotReady", func(t *testing.T) {
+		resp, err := env.HealthClient.Check(env.Ctx, &healthpb.HealthCheckRequest{Service: "readiness"})
+		if err != nil {
+			t.Fatalf("Health/Check(readiness) failed: %v", err)
+		}
+		if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
+			t.Errorf("expected NOT_SERVING, got %v", resp.Status)
 		}
 	})
 }
@@ -240,6 +270,57 @@ func TestHealthEndpoints_WatchStream(t *testing.T) {
 	})
 
 	// Transition back to not-ready — the stream should deliver NOT_SERVING.
+	env.Srv.SetNotReady()
+
+	t.Run("Watch delivers NOT_SERVING after SetNotReady", func(t *testing.T) {
+		resp, err := stream.Recv()
+		if err != nil {
+			t.Fatalf("Recv() failed: %v", err)
+		}
+		if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
+			t.Errorf("expected NOT_SERVING, got %v", resp.Status)
+		}
+	})
+}
+
+// TestHealthEndpoints_WatchReadinessKey verifies that the aggregate "readiness"
+// key delivers the same Watch stream updates as per-service keys. This is the
+// key a Kubernetes gRPC readiness probe would watch.
+func TestHealthEndpoints_WatchReadinessKey(t *testing.T) {
+	env := startHealthTestEnv(t, 19099, 18089)
+
+	watchCtx, watchCancel := context.WithTimeout(env.Ctx, 10*time.Second)
+	defer watchCancel()
+
+	stream, err := env.HealthClient.Watch(watchCtx, &healthpb.HealthCheckRequest{
+		Service: "readiness",
+	})
+	if err != nil {
+		t.Fatalf("Watch(readiness) failed: %v", err)
+	}
+
+	t.Run("initial Watch message is NOT_SERVING", func(t *testing.T) {
+		resp, err := stream.Recv()
+		if err != nil {
+			t.Fatalf("Recv() failed: %v", err)
+		}
+		if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
+			t.Errorf("expected NOT_SERVING, got %v", resp.Status)
+		}
+	})
+
+	env.Srv.SetReady()
+
+	t.Run("Watch delivers SERVING after SetReady", func(t *testing.T) {
+		resp, err := stream.Recv()
+		if err != nil {
+			t.Fatalf("Recv() failed: %v", err)
+		}
+		if resp.Status != healthpb.HealthCheckResponse_SERVING {
+			t.Errorf("expected SERVING, got %v", resp.Status)
+		}
+	})
+
 	env.Srv.SetNotReady()
 
 	t.Run("Watch delivers NOT_SERVING after SetNotReady", func(t *testing.T) {

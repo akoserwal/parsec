@@ -71,13 +71,80 @@ func TestHandleReadiness(t *testing.T) {
 	})
 }
 
+func TestReadinessServiceKey(t *testing.T) {
+	t.Run("starts as NOT_SERVING", func(t *testing.T) {
+		srv := newHealthTestServer()
+
+		resp, err := srv.healthServer.Check(nil, &healthpb.HealthCheckRequest{
+			Service: healthReadinessService,
+		})
+		if err != nil {
+			t.Fatalf("Check(%q) failed: %v", healthReadinessService, err)
+		}
+		if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
+			t.Errorf("expected NOT_SERVING, got %v", resp.Status)
+		}
+	})
+
+	t.Run("transitions to SERVING after SetReady", func(t *testing.T) {
+		srv := newHealthTestServer()
+		srv.SetReady()
+
+		resp, err := srv.healthServer.Check(nil, &healthpb.HealthCheckRequest{
+			Service: healthReadinessService,
+		})
+		if err != nil {
+			t.Fatalf("Check(%q) failed: %v", healthReadinessService, err)
+		}
+		if resp.Status != healthpb.HealthCheckResponse_SERVING {
+			t.Errorf("expected SERVING, got %v", resp.Status)
+		}
+	})
+
+	t.Run("transitions to NOT_SERVING after SetNotReady", func(t *testing.T) {
+		srv := newHealthTestServer()
+		srv.SetReady()
+		srv.SetNotReady()
+
+		resp, err := srv.healthServer.Check(nil, &healthpb.HealthCheckRequest{
+			Service: healthReadinessService,
+		})
+		if err != nil {
+			t.Fatalf("Check(%q) failed: %v", healthReadinessService, err)
+		}
+		if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
+			t.Errorf("expected NOT_SERVING, got %v", resp.Status)
+		}
+	})
+
+	t.Run("transitions to NOT_SERVING after Shutdown", func(t *testing.T) {
+		srv := newHealthTestServer()
+		srv.SetReady()
+		srv.healthServer.Shutdown()
+
+		resp, err := srv.healthServer.Check(nil, &healthpb.HealthCheckRequest{
+			Service: healthReadinessService,
+		})
+		if err != nil {
+			t.Fatalf("Check(%q) failed: %v", healthReadinessService, err)
+		}
+		if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
+			t.Errorf("expected NOT_SERVING, got %v", resp.Status)
+		}
+	})
+}
+
 // --- test helpers (bottom of file, per codebase convention) ---
 
 // newHealthTestServer creates a minimal Server with only the health server
-// initialized — enough to exercise handleLiveness and handleReadiness.
+// initialized — enough to exercise handleLiveness, handleReadiness, and
+// the readiness service key.
 func newHealthTestServer() *Server {
 	hs := health.NewServer()
-	// Mirror what Start() does: register each service as NOT_SERVING initially.
+	// Mirror what Start() does: register each service and the aggregate
+	// readiness key as NOT_SERVING initially.
+	hs.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+	hs.SetServingStatus(healthReadinessService, healthpb.HealthCheckResponse_NOT_SERVING)
 	for _, svc := range healthServices {
 		hs.SetServingStatus(svc, healthpb.HealthCheckResponse_NOT_SERVING)
 	}
