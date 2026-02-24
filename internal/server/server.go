@@ -39,18 +39,25 @@ type Server struct {
 	httpServer   *http.Server
 	healthServer *health.Server
 
-	grpcPort int
-	httpPort int
+	grpcListener    net.Listener
+	httpListener    net.Listener
+	grpcDialOptions []grpc.DialOption
 
 	authzServer    *AuthzServer
 	exchangeServer *ExchangeServer
 	jwksServer     *JWKSServer
 }
 
-// Config contains server configuration
+// Config contains server configuration. Callers must supply pre-created
+// listeners; the server itself has no concept of port numbers.
 type Config struct {
-	GRPCPort int
-	HTTPPort int
+	GRPCListener net.Listener
+	HTTPListener net.Listener
+
+	// GRPCDialOptions are extra dial options appended when the grpc-gateway
+	// dials the gRPC server. Use this to supply a custom dialer for
+	// in-memory transports (e.g. bufconn).
+	GRPCDialOptions []grpc.DialOption
 
 	AuthzServer    *AuthzServer
 	ExchangeServer *ExchangeServer
@@ -60,11 +67,12 @@ type Config struct {
 // New creates a new server with the given configuration
 func New(cfg Config) *Server {
 	return &Server{
-		grpcPort:       cfg.GRPCPort,
-		httpPort:       cfg.HTTPPort,
-		authzServer:    cfg.AuthzServer,
-		exchangeServer: cfg.ExchangeServer,
-		jwksServer:     cfg.JWKSServer,
+		grpcListener:    cfg.GRPCListener,
+		httpListener:    cfg.HTTPListener,
+		grpcDialOptions: cfg.GRPCDialOptions,
+		authzServer:     cfg.AuthzServer,
+		exchangeServer:  cfg.ExchangeServer,
+		jwksServer:      cfg.JWKSServer,
 	}
 }
 
@@ -96,28 +104,25 @@ func (s *Server) Start(ctx context.Context) error {
 	// Register reflection service for grpcurl and other tools
 	reflection.Register(s.grpcServer)
 
-	// Start gRPC server
-	grpcListener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.grpcPort))
-	if err != nil {
-		return fmt.Errorf("failed to listen on gRPC port %d: %w", s.grpcPort, err)
-	}
-
+	// Start gRPC server on the provided listener
 	go func() {
-		fmt.Printf("gRPC server listening on :%d\n", s.grpcPort)
-		if err := s.grpcServer.Serve(grpcListener); err != nil {
+		if err := s.grpcServer.Serve(s.grpcListener); err != nil {
 			fmt.Printf("gRPC server error: %v\n", err)
 		}
 	}()
 
-	// Create HTTP server with grpc-gateway
-	// Register custom marshaler for application/x-www-form-urlencoded (RFC 8693 compliance)
+	// Create HTTP server with grpc-gateway.
+	// Use passthrough resolver so the address is used as-is (works for both
+	// TCP addresses and in-memory transports like bufconn).
 	gwMux := runtime.NewServeMux(
 		runtime.WithMarshalerOption("application/x-www-form-urlencoded", NewFormMarshaler()),
 	)
-	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	opts := append(
+		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
+		s.grpcDialOptions...,
+	)
 
-	// Register HTTP handlers (transcoding from gRPC)
-	endpoint := fmt.Sprintf("localhost:%d", s.grpcPort)
+	endpoint := "passthrough:///" + s.grpcListener.Addr().String()
 	if err := parsecv1.RegisterTokenExchangeServiceHandlerFromEndpoint(ctx, gwMux, endpoint, opts); err != nil {
 		return fmt.Errorf("failed to register token exchange handler: %w", err)
 	}
@@ -131,15 +136,11 @@ func (s *Server) Start(ctx context.Context) error {
 	httpMux.HandleFunc("GET /healthz/ready", s.handleReadiness)
 	httpMux.Handle("/", gwMux)
 
-	// Start HTTP server
-	s.httpServer = &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.httpPort),
-		Handler: httpMux,
-	}
+	// Start HTTP server on the provided listener
+	s.httpServer = &http.Server{Handler: httpMux}
 
 	go func() {
-		fmt.Printf("HTTP server (grpc-gateway) listening on :%d\n", s.httpPort)
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.httpServer.Serve(s.httpListener); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("HTTP server error: %v\n", err)
 		}
 	}()
