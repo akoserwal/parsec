@@ -2,149 +2,14 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 )
-
-// ---------------------------------------------------------------------------
-// Unit tests — exercise handler functions directly, no network
-// ---------------------------------------------------------------------------
-
-func TestHandleLiveness(t *testing.T) {
-	srv := newHealthTestServer()
-
-	t.Run("always returns 200 OK", func(t *testing.T) {
-		rec := checkLiveness(t, srv)
-		assertHealthResponse(t, rec, http.StatusOK, "OK")
-	})
-}
-
-func TestHandleReadiness(t *testing.T) {
-	t.Run("returns 200 when all services are SERVING", func(t *testing.T) {
-		srv := newHealthTestServer()
-		srv.SetReady()
-
-		rec := checkReadiness(t, srv)
-		assertHealthResponse(t, rec, http.StatusOK, "SERVING")
-	})
-
-	t.Run("returns 503 when no services are SERVING", func(t *testing.T) {
-		srv := newHealthTestServer() // all start as NOT_SERVING
-
-		rec := checkReadiness(t, srv)
-		body := assertHealthResponse(t, rec, http.StatusServiceUnavailable, "NOT_SERVING")
-
-		// The first service in the list should be reported.
-		if body["service"] != healthServices[0] {
-			t.Errorf("expected service %q, got %q", healthServices[0], body["service"])
-		}
-	})
-
-	t.Run("returns 503 identifying the specific failing service", func(t *testing.T) {
-		for _, failing := range healthServices {
-			t.Run(failing, func(t *testing.T) {
-				srv := newHealthTestServer()
-				srv.SetReady() // all SERVING
-
-				// Break just this one service.
-				srv.healthServer.SetServingStatus(failing, healthpb.HealthCheckResponse_NOT_SERVING)
-
-				rec := checkReadiness(t, srv)
-				body := assertHealthResponse(t, rec, http.StatusServiceUnavailable, "NOT_SERVING")
-
-				if body["service"] != failing {
-					t.Errorf("expected failing service %q, got %q", failing, body["service"])
-				}
-			})
-		}
-	})
-
-	t.Run("returns 503 after health server shutdown", func(t *testing.T) {
-		srv := newHealthTestServer()
-		srv.SetReady()
-
-		// Shutdown marks everything NOT_SERVING and ignores future SetServingStatus calls.
-		srv.healthServer.Shutdown()
-
-		rec := checkReadiness(t, srv)
-		assertHealthResponse(t, rec, http.StatusServiceUnavailable, "NOT_SERVING")
-	})
-}
-
-func TestReadinessServiceKey(t *testing.T) {
-	t.Run("starts as NOT_SERVING", func(t *testing.T) {
-		srv := newHealthTestServer()
-
-		resp, err := srv.healthServer.Check(context.Background(), &healthpb.HealthCheckRequest{
-			Service: healthReadinessService,
-		})
-		if err != nil {
-			t.Fatalf("Check(%q) failed: %v", healthReadinessService, err)
-		}
-		if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
-			t.Errorf("expected NOT_SERVING, got %v", resp.Status)
-		}
-	})
-
-	t.Run("transitions to SERVING after SetReady", func(t *testing.T) {
-		srv := newHealthTestServer()
-		srv.SetReady()
-
-		resp, err := srv.healthServer.Check(context.Background(), &healthpb.HealthCheckRequest{
-			Service: healthReadinessService,
-		})
-		if err != nil {
-			t.Fatalf("Check(%q) failed: %v", healthReadinessService, err)
-		}
-		if resp.Status != healthpb.HealthCheckResponse_SERVING {
-			t.Errorf("expected SERVING, got %v", resp.Status)
-		}
-	})
-
-	t.Run("transitions to NOT_SERVING after SetNotReady", func(t *testing.T) {
-		srv := newHealthTestServer()
-		srv.SetReady()
-		srv.SetNotReady()
-
-		resp, err := srv.healthServer.Check(context.Background(), &healthpb.HealthCheckRequest{
-			Service: healthReadinessService,
-		})
-		if err != nil {
-			t.Fatalf("Check(%q) failed: %v", healthReadinessService, err)
-		}
-		if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
-			t.Errorf("expected NOT_SERVING, got %v", resp.Status)
-		}
-	})
-
-	t.Run("transitions to NOT_SERVING after Shutdown", func(t *testing.T) {
-		srv := newHealthTestServer()
-		srv.SetReady()
-		srv.healthServer.Shutdown()
-
-		resp, err := srv.healthServer.Check(context.Background(), &healthpb.HealthCheckRequest{
-			Service: healthReadinessService,
-		})
-		if err != nil {
-			t.Fatalf("Check(%q) failed: %v", healthReadinessService, err)
-		}
-		if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
-			t.Errorf("expected NOT_SERVING, got %v", resp.Status)
-		}
-	})
-}
-
-// ---------------------------------------------------------------------------
-// Server tests — exercise the full gRPC + HTTP stack via startTestServer
-// ---------------------------------------------------------------------------
 
 // TestHealthLifecycle validates the full health check lifecycle through both
 // HTTP and gRPC interfaces:
@@ -308,6 +173,36 @@ func TestHealthLifecycle(t *testing.T) {
 	})
 }
 
+// TestHealthReadinessIdentifiesFailingService verifies that when a single
+// service transitions to NOT_SERVING, the HTTP readiness endpoint returns
+// 503 and names that specific service in the response body.
+func TestHealthReadinessIdentifiesFailingService(t *testing.T) {
+	env := startTestServer(t, stubServerConfig())
+	env.Srv.SetReady()
+
+	for _, svc := range healthServices {
+		t.Run(svc, func(t *testing.T) {
+			env.Srv.healthServer.SetServingStatus(svc, healthpb.HealthCheckResponse_NOT_SERVING)
+			defer env.Srv.healthServer.SetServingStatus(svc, healthpb.HealthCheckResponse_SERVING)
+
+			resp, err := env.HTTPClient.Get(env.HTTPBaseURL + "/healthz/ready")
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			if resp.StatusCode != http.StatusServiceUnavailable {
+				t.Fatalf("expected 503, got %d", resp.StatusCode)
+			}
+
+			body := decodeJSONBody(t, resp.Body)
+			if body["service"] != svc {
+				t.Errorf("expected failing service %q, got %q", svc, body["service"])
+			}
+		})
+	}
+}
+
 // TestHealthUnknownService verifies that querying an unregistered service
 // returns gRPC NOT_FOUND, per the gRPC Health Checking Protocol spec.
 func TestHealthUnknownService(t *testing.T) {
@@ -431,56 +326,4 @@ func TestHealthWatchReadinessKey(t *testing.T) {
 			t.Errorf("expected NOT_SERVING, got %v", resp.Status)
 		}
 	})
-}
-
-// --- unit test helpers (handler-level, no network) ---
-
-// newHealthTestServer creates a minimal Server with only the health server
-// initialized — enough to exercise handleLiveness, handleReadiness, and
-// the readiness service key.
-func newHealthTestServer() *Server {
-	hs := health.NewServer()
-	// Mirror what Start() does: register each service and the aggregate
-	// readiness key as NOT_SERVING initially.
-	hs.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
-	hs.SetServingStatus(healthReadinessService, healthpb.HealthCheckResponse_NOT_SERVING)
-	for _, svc := range healthServices {
-		hs.SetServingStatus(svc, healthpb.HealthCheckResponse_NOT_SERVING)
-	}
-	return &Server{healthServer: hs}
-}
-
-func checkLiveness(t *testing.T, srv *Server) *httptest.ResponseRecorder {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/healthz/live", nil)
-	rec := httptest.NewRecorder()
-	srv.handleLiveness(rec, req)
-	return rec
-}
-
-func checkReadiness(t *testing.T, srv *Server) *httptest.ResponseRecorder {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/healthz/ready", nil)
-	rec := httptest.NewRecorder()
-	srv.handleReadiness(rec, req)
-	return rec
-}
-
-func assertHealthResponse(t *testing.T, rec *httptest.ResponseRecorder, wantCode int, wantStatus string) map[string]string {
-	t.Helper()
-
-	if rec.Code != wantCode {
-		t.Fatalf("expected HTTP %d, got %d", wantCode, rec.Code)
-	}
-
-	var body map[string]string
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("failed to decode body: %v", err)
-	}
-
-	if body["status"] != wantStatus {
-		t.Errorf("expected status %q, got %q", wantStatus, body["status"])
-	}
-
-	return body
 }
