@@ -165,8 +165,12 @@ func (l *Loader) Watch(ctx context.Context, onChange func(*Config) error) error 
 			return
 		}
 
-		// Create new koanf instance for reload
+		// Create new koanf instance for reload (same precedence as startup)
 		k := koanf.New(".")
+		if err := k.Load(confmap.Provider(getDefaults(), "."), nil); err != nil {
+			fmt.Printf("config defaults reload error: %v\n", err)
+			return
+		}
 		if err := k.Load(fp, parser); err != nil {
 			fmt.Printf("config reload error: %v\n", err)
 			return
