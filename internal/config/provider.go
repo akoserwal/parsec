@@ -160,12 +160,14 @@ func (p *Provider) TokenService() (*service.TokenService, error) {
 	return tokenService, nil
 }
 
-// ServerConfig returns the server configuration
-func (p *Provider) ServerConfig() server.Config {
-	return server.Config{
-		GRPCPort: p.config.Server.GRPCPort,
-		HTTPPort: p.config.Server.HTTPPort,
-	}
+// GRPCPort returns the configured gRPC port.
+func (p *Provider) GRPCPort() int {
+	return p.config.Server.GRPCPort
+}
+
+// HTTPPort returns the configured HTTP port.
+func (p *Provider) HTTPPort() int {
+	return p.config.Server.HTTPPort
 }
 
 // TrustDomain returns the configured trust domain

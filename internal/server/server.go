@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -10,28 +11,53 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
 	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
 )
 
+// healthReadinessService is the aggregate readiness key for Kubernetes gRPC
+// readiness probes. It transitions to SERVING only when all application
+// services are ready, and back to NOT_SERVING when any become unready.
+// See: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-a-grpc-liveness-probe
+const healthReadinessService = "readiness"
+
+// healthServices lists the full proto service names registered on the gRPC server.
+// Per the gRPC Health Checking Protocol, each service is registered individually
+// in the health server so clients can query per-service health status.
+var healthServices = []string{
+	"envoy.service.auth.v3.Authorization",
+	"parsec.v1.TokenExchangeService",
+	"parsec.v1.JWKSService",
+}
+
 // Server manages the gRPC and HTTP servers
 type Server struct {
-	grpcServer *grpc.Server
-	httpServer *http.Server
+	grpcServer   *grpc.Server
+	httpServer   *http.Server
+	healthServer *health.Server
 
-	grpcPort int
-	httpPort int
+	grpcListener    net.Listener
+	httpListener    net.Listener
+	grpcDialOptions []grpc.DialOption
 
 	authzServer    *AuthzServer
 	exchangeServer *ExchangeServer
 	jwksServer     *JWKSServer
 }
 
-// Config contains server configuration
+// Config contains server configuration. Callers must supply pre-created
+// listeners; the server itself has no concept of port numbers.
 type Config struct {
-	GRPCPort int
-	HTTPPort int
+	GRPCListener net.Listener
+	HTTPListener net.Listener
+
+	// GRPCDialOptions are extra dial options appended when the grpc-gateway
+	// dials the gRPC server. Use this to supply a custom dialer for
+	// in-memory transports (e.g. bufconn).
+	GRPCDialOptions []grpc.DialOption
 
 	AuthzServer    *AuthzServer
 	ExchangeServer *ExchangeServer
@@ -41,16 +67,24 @@ type Config struct {
 // New creates a new server with the given configuration
 func New(cfg Config) *Server {
 	return &Server{
-		grpcPort:       cfg.GRPCPort,
-		httpPort:       cfg.HTTPPort,
-		authzServer:    cfg.AuthzServer,
-		exchangeServer: cfg.ExchangeServer,
-		jwksServer:     cfg.JWKSServer,
+		grpcListener:    cfg.GRPCListener,
+		httpListener:    cfg.HTTPListener,
+		grpcDialOptions: cfg.GRPCDialOptions,
+		authzServer:     cfg.AuthzServer,
+		exchangeServer:  cfg.ExchangeServer,
+		jwksServer:      cfg.JWKSServer,
 	}
 }
 
 // Start starts both the gRPC and HTTP servers
 func (s *Server) Start(ctx context.Context) error {
+	if s.grpcListener == nil {
+		return fmt.Errorf("missing gRPC listener")
+	}
+	if s.httpListener == nil {
+		return fmt.Errorf("missing HTTP listener")
+	}
+
 	// Create gRPC server
 	s.grpcServer = grpc.NewServer()
 
@@ -59,47 +93,61 @@ func (s *Server) Start(ctx context.Context) error {
 	parsecv1.RegisterTokenExchangeServiceServer(s.grpcServer, s.exchangeServer)
 	parsecv1.RegisterJWKSServiceServer(s.grpcServer, s.jwksServer)
 
+	// Register standard gRPC health checking service (grpc.health.v1.Health).
+	// See: https://github.com/grpc/grpc/blob/master/doc/health-checking.md
+	s.healthServer = health.NewServer()
+	healthpb.RegisterHealthServer(s.grpcServer, s.healthServer)
+
+	// Per the spec, register all services manually including the empty string
+	// for overall server health (liveness). The empty string is set to SERVING
+	// immediately and remains so until Shutdown() is called during Stop(),
+	// which sets every service to NOT_SERVING. Per-service and readiness
+	// statuses start as NOT_SERVING until SetReady() is called.
+	s.healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+	s.healthServer.SetServingStatus(healthReadinessService, healthpb.HealthCheckResponse_NOT_SERVING)
+	for _, svc := range healthServices {
+		s.healthServer.SetServingStatus(svc, healthpb.HealthCheckResponse_NOT_SERVING)
+	}
+
 	// Register reflection service for grpcurl and other tools
 	reflection.Register(s.grpcServer)
 
-	// Start gRPC server
-	grpcListener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.grpcPort))
-	if err != nil {
-		return fmt.Errorf("failed to listen on gRPC port %d: %w", s.grpcPort, err)
-	}
-
-	go func() {
-		fmt.Printf("gRPC server listening on :%d\n", s.grpcPort)
-		if err := s.grpcServer.Serve(grpcListener); err != nil {
-			fmt.Printf("gRPC server error: %v\n", err)
-		}
-	}()
-
-	// Create HTTP server with grpc-gateway
-	// Register custom marshaler for application/x-www-form-urlencoded (RFC 8693 compliance)
-	mux := runtime.NewServeMux(
+	// Create HTTP server with grpc-gateway.
+	// Use passthrough resolver so the address is used as-is (works for both
+	// TCP addresses and in-memory transports like bufconn).
+	gwMux := runtime.NewServeMux(
 		runtime.WithMarshalerOption("application/x-www-form-urlencoded", NewFormMarshaler()),
 	)
-	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	opts := append(
+		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
+		s.grpcDialOptions...,
+	)
 
-	// Register HTTP handlers (transcoding from gRPC)
-	endpoint := fmt.Sprintf("localhost:%d", s.grpcPort)
-	if err := parsecv1.RegisterTokenExchangeServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
+	endpoint := grpcDialEndpoint(s.grpcListener.Addr().String())
+	if err := parsecv1.RegisterTokenExchangeServiceHandlerFromEndpoint(ctx, gwMux, endpoint, opts); err != nil {
 		return fmt.Errorf("failed to register token exchange handler: %w", err)
 	}
-	if err := parsecv1.RegisterJWKSServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
+	if err := parsecv1.RegisterJWKSServiceHandlerFromEndpoint(ctx, gwMux, endpoint, opts); err != nil {
 		return fmt.Errorf("failed to register JWKS handler: %w", err)
 	}
 
-	// Start HTTP server
-	s.httpServer = &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.httpPort),
-		Handler: mux,
-	}
+	// Build top-level HTTP mux with health endpoints and grpc-gateway routes
+	httpMux := http.NewServeMux()
+	httpMux.HandleFunc("GET /healthz/live", s.handleLiveness)
+	httpMux.HandleFunc("GET /healthz/ready", s.handleReadiness)
+	httpMux.Handle("/", gwMux)
 
+	s.httpServer = &http.Server{Handler: httpMux}
+
+	// All fallible setup is complete. Launch the serve goroutines last so
+	// that an early-return error never orphans a running goroutine.
 	go func() {
-		fmt.Printf("HTTP server (grpc-gateway) listening on :%d\n", s.httpPort)
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.grpcServer.Serve(s.grpcListener); err != nil {
+			fmt.Printf("gRPC server error: %v\n", err)
+		}
+	}()
+	go func() {
+		if err := s.httpServer.Serve(s.httpListener); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("HTTP server error: %v\n", err)
 		}
 	}()
@@ -107,8 +155,34 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
+// SetReady transitions all per-service and the aggregate readiness
+// health statuses to SERVING. Call this after all components have been
+// successfully initialized.
+func (s *Server) SetReady() {
+	for _, svc := range healthServices {
+		s.healthServer.SetServingStatus(svc, healthpb.HealthCheckResponse_SERVING)
+	}
+	s.healthServer.SetServingStatus(healthReadinessService, healthpb.HealthCheckResponse_SERVING)
+}
+
+// SetNotReady transitions all per-service and the aggregate readiness
+// health statuses to NOT_SERVING.
+func (s *Server) SetNotReady() {
+	for _, svc := range healthServices {
+		s.healthServer.SetServingStatus(svc, healthpb.HealthCheckResponse_NOT_SERVING)
+	}
+	s.healthServer.SetServingStatus(healthReadinessService, healthpb.HealthCheckResponse_NOT_SERVING)
+}
+
 // Stop gracefully stops both servers
 func (s *Server) Stop(ctx context.Context) error {
+	// Signal health watchers that all services are going away.
+	// Shutdown sets every registered service to NOT_SERVING and
+	// ignores any future SetServingStatus calls.
+	if s.healthServer != nil {
+		s.healthServer.Shutdown()
+	}
+
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
@@ -118,4 +192,54 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// grpcDialEndpoint builds a passthrough:/// endpoint suitable for grpc-gateway
+// to dial. If the listener is bound to a wildcard address (0.0.0.0, [::], or
+// empty host), it is replaced with the corresponding loopback address so the
+// connection targets a dialable address. Non-TCP transports (e.g. bufconn)
+// whose addresses aren't in host:port form are used as-is.
+func grpcDialEndpoint(listenAddr string) string {
+	host, port, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		return "passthrough:///" + listenAddr
+	}
+	switch host {
+	case "", "0.0.0.0":
+		host = "127.0.0.1"
+	case "::":
+		host = "::1"
+	}
+	return "passthrough:///" + net.JoinHostPort(host, port)
+}
+
+// handleLiveness is the HTTP liveness probe handler.
+// It always returns 200 OK if the process is running.
+func (s *Server) handleLiveness(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "OK"})
+}
+
+// handleReadiness is the HTTP readiness probe handler.
+// It queries the gRPC health server for every registered per-service status
+// and returns 200 only when ALL services are SERVING, 503 otherwise.
+func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+
+	for _, svc := range healthServices {
+		resp, err := s.healthServer.Check(r.Context(), &healthpb.HealthCheckRequest{
+			Service: svc,
+		})
+		if err != nil || resp.Status != healthpb.HealthCheckResponse_SERVING {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "NOT_SERVING", "service": svc})
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "SERVING"})
 }
