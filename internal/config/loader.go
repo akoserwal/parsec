@@ -10,7 +10,7 @@ import (
 	"github.com/knadh/koanf/parsers/toml/v2"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
-	"github.com/knadh/koanf/providers/env"
+	env "github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/posflag"
 	"github.com/knadh/koanf/v2"
@@ -87,7 +87,12 @@ func newLoader(configPath string, flags *pflag.FlagSet) (*Loader, error) {
 	// Load environment variable overrides with PARSEC_ prefix
 	// Use double underscore (__) for nesting: PARSEC_SERVER__GRPC_PORT -> server.grpc_port
 	// Single underscore is part of the field name: PARSEC_TRUST_DOMAIN -> trust_domain
-	if err := k.Load(env.Provider("PARSEC_", ".", envTransform), nil); err != nil {
+	if err := k.Load(env.Provider(".", env.Opt{
+		Prefix: "PARSEC_",
+		TransformFunc: func(k, v string) (string, any) {
+			return envTransform(k), v
+		},
+	}), nil); err != nil {
 		return nil, fmt.Errorf("failed to load environment variables: %w", err)
 	}
 
@@ -160,15 +165,24 @@ func (l *Loader) Watch(ctx context.Context, onChange func(*Config) error) error 
 			return
 		}
 
-		// Create new koanf instance for reload
+		// Create new koanf instance for reload (same precedence as startup)
 		k := koanf.New(".")
+		if err := k.Load(confmap.Provider(getDefaults(), "."), nil); err != nil {
+			fmt.Printf("config defaults reload error: %v\n", err)
+			return
+		}
 		if err := k.Load(fp, parser); err != nil {
 			fmt.Printf("config reload error: %v\n", err)
 			return
 		}
 
 		// Reload env vars
-		if err := k.Load(env.Provider("PARSEC_", ".", envTransform), nil); err != nil {
+		if err := k.Load(env.Provider(".", env.Opt{
+			Prefix: "PARSEC_",
+			TransformFunc: func(k, v string) (string, any) {
+				return envTransform(k), v
+			},
+		}), nil); err != nil {
 			fmt.Printf("env reload error: %v\n", err)
 			return
 		}
