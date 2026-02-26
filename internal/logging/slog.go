@@ -26,9 +26,13 @@ func (s *slogLogger) Log(ctx context.Context, level Level, msg string, attrs ...
 	if !s.l.Enabled(ctx, sl) {
 		return
 	}
+	if len(attrs) == 0 {
+		s.l.LogAttrs(ctx, sl, msg)
+		return
+	}
 	slogAttrs := make([]slog.Attr, len(attrs))
 	for i, a := range attrs {
-		slogAttrs[i] = slog.Any(a.Key, a.Value)
+		slogAttrs[i] = slog.Any(a.key, a.value)
 	}
 	s.l.LogAttrs(ctx, sl, msg, slogAttrs...)
 }
@@ -43,7 +47,7 @@ func (s *slogLogger) With(attrs ...Attr) Logger {
 	}
 	slogAttrs := make([]slog.Attr, len(attrs))
 	for i, a := range attrs {
-		slogAttrs[i] = slog.Any(a.Key, a.Value)
+		slogAttrs[i] = slog.Any(a.key, a.value)
 	}
 	newHandler := s.l.Handler().WithAttrs(slogAttrs)
 	return &slogLogger{l: slog.New(newHandler)}

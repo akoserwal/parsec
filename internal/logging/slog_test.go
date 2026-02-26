@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"strings"
 	"testing"
 	"time"
 )
@@ -46,7 +45,7 @@ func TestSlogLogger_LevelMapping(t *testing.T) {
 	}
 }
 
-func TestSlogLogger_AttrsAppearInOutput(t *testing.T) {
+func TestSlogLogger_AttrsInOutput(t *testing.T) {
 	var buf bytes.Buffer
 	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
 	l := NewFromSlog(slog.New(handler))
@@ -55,6 +54,8 @@ func TestSlogLogger_AttrsAppearInOutput(t *testing.T) {
 		String("method", "GET"),
 		Int("status", 200),
 		Bool("ok", true),
+		Duration("elapsed", 150*time.Millisecond),
+		Err(errors.New("boom")),
 	)
 
 	var record map[string]any
@@ -62,98 +63,91 @@ func TestSlogLogger_AttrsAppearInOutput(t *testing.T) {
 		t.Fatalf("failed to parse JSON: %v", err)
 	}
 
-	if record["msg"] != "hello" {
-		t.Errorf("msg = %q, want %q", record["msg"], "hello")
+	exact := map[string]any{
+		"msg":    "hello",
+		"method": "GET",
+		"status": float64(200),
+		"ok":     true,
+		"error":  "boom",
 	}
-	if record["method"] != "GET" {
-		t.Errorf("method = %v, want %q", record["method"], "GET")
+	for key, want := range exact {
+		if record[key] != want {
+			t.Errorf("%s = %v (%T), want %v (%T)", key, record[key], record[key], want, want)
+		}
 	}
-	if record["status"] != float64(200) {
-		t.Errorf("status = %v, want 200", record["status"])
-	}
-	if record["ok"] != true {
-		t.Errorf("ok = %v, want true", record["ok"])
+	if _, exists := record["elapsed"]; !exists {
+		t.Error("elapsed attribute missing from output")
 	}
 }
 
-func TestSlogLogger_ErrAttr(t *testing.T) {
+func TestSlogLogger_LevelFiltering(t *testing.T) {
+	t.Run("Enabled", func(t *testing.T) {
+		handler := slog.NewJSONHandler(&bytes.Buffer{}, &slog.HandlerOptions{Level: slog.LevelWarn})
+		l := NewFromSlog(slog.New(handler))
+
+		if l.Enabled(context.Background(), Debug) {
+			t.Error("Enabled(Debug) should be false when handler level is Warn")
+		}
+		if l.Enabled(context.Background(), Info) {
+			t.Error("Enabled(Info) should be false when handler level is Warn")
+		}
+		if !l.Enabled(context.Background(), Warn) {
+			t.Error("Enabled(Warn) should be true when handler level is Warn")
+		}
+		if !l.Enabled(context.Background(), Error) {
+			t.Error("Enabled(Error) should be true when handler level is Warn")
+		}
+	})
+
+	t.Run("LogSuppressesOutput", func(t *testing.T) {
+		var buf bytes.Buffer
+		handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})
+		l := NewFromSlog(slog.New(handler))
+
+		l.Log(context.Background(), Debug, "should not appear")
+		l.Log(context.Background(), Info, "should not appear")
+
+		if buf.Len() != 0 {
+			t.Errorf("expected no output for below-threshold levels, got: %s", buf.String())
+		}
+
+		l.Log(context.Background(), Warn, "should appear")
+		if buf.Len() == 0 {
+			t.Error("expected output for Warn level")
+		}
+	})
+}
+
+func TestSlogLogger_WithImmutability(t *testing.T) {
 	var buf bytes.Buffer
 	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
-	l := NewFromSlog(slog.New(handler))
+	parent := NewFromSlog(slog.New(handler))
 
-	l.Log(context.Background(), Error, "failed", Err(errors.New("boom")))
+	child := parent.With(String("child_key", "child_val"))
 
-	var record map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &record); err != nil {
-		t.Fatalf("failed to parse JSON: %v", err)
+	// Parent must not carry the child's attribute
+	parent.Log(context.Background(), Info, "parent log")
+	parentLine, _, _ := bytes.Cut(buf.Bytes(), []byte("\n"))
+
+	var parentRecord map[string]any
+	if err := json.Unmarshal(parentLine, &parentRecord); err != nil {
+		t.Fatalf("failed to parse parent JSON: %v", err)
 	}
-	if record["error"] != "boom" {
-		t.Errorf("error = %v, want %q", record["error"], "boom")
-	}
-}
-
-func TestSlogLogger_DurationAttr(t *testing.T) {
-	var buf bytes.Buffer
-	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
-	l := NewFromSlog(slog.New(handler))
-
-	l.Log(context.Background(), Info, "req", Duration("elapsed", 150*time.Millisecond))
-
-	if !strings.Contains(buf.String(), "elapsed=") {
-		t.Errorf("output %q does not contain elapsed attribute", buf.String())
-	}
-}
-
-func TestSlogLogger_EnabledShortCircuit(t *testing.T) {
-	handler := slog.NewJSONHandler(&bytes.Buffer{}, &slog.HandlerOptions{Level: slog.LevelWarn})
-	l := NewFromSlog(slog.New(handler))
-
-	if l.Enabled(context.Background(), Debug) {
-		t.Error("Enabled(Debug) should be false when handler level is Warn")
-	}
-	if l.Enabled(context.Background(), Info) {
-		t.Error("Enabled(Info) should be false when handler level is Warn")
-	}
-	if !l.Enabled(context.Background(), Warn) {
-		t.Error("Enabled(Warn) should be true when handler level is Warn")
-	}
-	if !l.Enabled(context.Background(), Error) {
-		t.Error("Enabled(Error) should be true when handler level is Warn")
-	}
-}
-
-func TestSlogLogger_LogRespectsEnabled(t *testing.T) {
-	var buf bytes.Buffer
-	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})
-	l := NewFromSlog(slog.New(handler))
-
-	l.Log(context.Background(), Debug, "should not appear")
-	l.Log(context.Background(), Info, "should not appear")
-
-	if buf.Len() != 0 {
-		t.Errorf("expected no output for below-threshold levels, got: %s", buf.String())
+	if _, exists := parentRecord["child_key"]; exists {
+		t.Error("parent log should not contain child_key attribute")
 	}
 
-	l.Log(context.Background(), Warn, "should appear")
-	if buf.Len() == 0 {
-		t.Error("expected output for Warn level")
+	// Child derived from the same parent must carry its attribute
+	child.Log(context.Background(), Info, "child log")
+	lines := bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n"))
+	childLine := lines[len(lines)-1]
+
+	var childRecord map[string]any
+	if err := json.Unmarshal(childLine, &childRecord); err != nil {
+		t.Fatalf("failed to parse child JSON: %v", err)
 	}
-}
-
-func TestSlogLogger_With(t *testing.T) {
-	var buf bytes.Buffer
-	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
-	l := NewFromSlog(slog.New(handler))
-
-	child := l.With(String("component", "server"))
-	child.Log(context.Background(), Info, "started")
-
-	var record map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &record); err != nil {
-		t.Fatalf("failed to parse JSON: %v", err)
-	}
-	if record["component"] != "server" {
-		t.Errorf("component = %v, want %q", record["component"], "server")
+	if childRecord["child_key"] != "child_val" {
+		t.Errorf("child_key = %v, want %q", childRecord["child_key"], "child_val")
 	}
 }
 
@@ -163,36 +157,6 @@ func TestSlogLogger_WithEmptyReturnsOriginal(t *testing.T) {
 	got := l.With()
 	if got != l {
 		t.Error("With() with no attrs should return the same logger instance")
-	}
-}
-
-func TestSlogLogger_WithDoesNotMutateParent(t *testing.T) {
-	var parentBuf, childBuf bytes.Buffer
-	parentHandler := slog.NewJSONHandler(&parentBuf, &slog.HandlerOptions{Level: slog.LevelDebug})
-	parent := NewFromSlog(slog.New(parentHandler))
-
-	child := parent.With(String("child_key", "child_val"))
-	_ = child
-
-	parent.Log(context.Background(), Info, "parent log")
-
-	var record map[string]any
-	if err := json.Unmarshal(parentBuf.Bytes(), &record); err != nil {
-		t.Fatalf("failed to parse parent JSON: %v", err)
-	}
-	if _, exists := record["child_key"]; exists {
-		t.Error("parent log should not contain child_key attribute")
-	}
-
-	childHandler := slog.NewJSONHandler(&childBuf, &slog.HandlerOptions{Level: slog.LevelDebug})
-	child = NewFromSlog(slog.New(childHandler)).With(String("child_key", "child_val"))
-	child.Log(context.Background(), Info, "child log")
-
-	if err := json.Unmarshal(childBuf.Bytes(), &record); err != nil {
-		t.Fatalf("failed to parse child JSON: %v", err)
-	}
-	if record["child_key"] != "child_val" {
-		t.Errorf("child_key = %v, want %q", record["child_key"], "child_val")
 	}
 }
 
