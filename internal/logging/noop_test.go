@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-func TestNoopLogger_ImplementsInterface(t *testing.T) {
-	var _ Logger = NewNoop()
-}
-
 func TestNoopLogger_EnabledReturnsFalse(t *testing.T) {
 	l := NewNoop()
 	for _, level := range []Level{Debug, Info, Warn, Error} {

@@ -22,7 +22,7 @@ func TestLevel_String(t *testing.T) {
 }
 
 func TestLevel_Ordering(t *testing.T) {
-	if !(Debug < Info && Info < Warn && Warn < Error) {
+	if Debug >= Info || Info >= Warn || Warn >= Error {
 		t.Fatal("levels must be ordered Debug < Info < Warn < Error")
 	}
 }

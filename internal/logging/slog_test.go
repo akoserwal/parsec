@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-func TestSlogLogger_ImplementsInterface(t *testing.T) {
-	var _ Logger = NewFromSlog(slog.Default())
-}
-
 func TestSlogLogger_NilReturnsNoop(t *testing.T) {
 	l := NewFromSlog(nil)
 	if _, ok := l.(noopLogger); !ok {
