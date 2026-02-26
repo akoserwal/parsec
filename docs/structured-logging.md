@@ -229,12 +229,17 @@ func toSlogLevel(l Level) slog.Level {
 
 ```go
 type Attr struct {
-    Key   string
-    Value any
+    key   string
+    value any
 }
+
+func (a Attr) Key() string { return a.key }
+func (a Attr) Value() any  { return a.value }
 ```
 
-Typed constructors enforce correct usage at call sites:
+Fields are unexported to enforce construction through typed constructors. Direct struct literals like `Attr{Key: "foo", Value: 123}` are not possible from outside the package. Accessor methods `Key()` and `Value()` are provided for any future external Logger implementations.
+
+### Typed constructors
 
 | Constructor | Type | Example |
 |---|---|---|
@@ -246,8 +251,6 @@ Typed constructors enforce correct usage at call sites:
 | `Time(key, val)` | `time.Time` | `Time("issued_at", token.IssuedAt)` |
 | `Any(key, val)` | `any` | `Any("token_types", tokenTypes)` |
 | `Err(err)` | `error` | `Err(err)` -- key is always `"error"` |
-
-`Value` is typed as `any` so that the logging package has no dependency on any backend. The slog adapter uses `slog.Any()` internally, which does a type-switch for `string`, `int64`, `float64`, `bool`, `time.Time`, `time.Duration`, and `error` -- so common types are encoded efficiently without reflection.
 
 `Err(err)` standardises the error attribute key as `"error"` across the entire codebase, replacing the inconsistent `slog.String("error", err.Error())` pattern.
 
@@ -263,8 +266,8 @@ logger := logging.NewFromSlog(slog.New(handler))
 
 Key behaviours:
 
-- `Log()` short-circuits via `slog.Logger.Enabled()` before allocating the `[]slog.Attr` conversion slice
-- `With()` calls `handler.WithAttrs()` to create a new handler, preserving the parent's immutability
+- `Log()` short-circuits via `slog.Logger.Enabled()` before allocating the `[]slog.Attr` conversion slice. When `attrs` is empty, it calls `LogAttrs` directly without allocating a slice.
+- `With()` converts `[]logging.Attr` to `[]slog.Attr` and calls `handler.WithAttrs()` to create a new handler, preserving the parent's immutability. Returns the same instance when called with no attrs.
 - `WithGroup()` delegates directly to `slog.Logger.WithGroup()`
 - `NewFromSlog(nil)` returns `NewNoop()` as a safe fallback
 
