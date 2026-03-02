@@ -28,7 +28,8 @@ func NewObserverWithLogger(cfg *ObservabilityConfig, logger zerolog.Logger) (ser
 	switch cfg.Type {
 	case "logging":
 		return probe.NewLoggingObserverWithConfig(probe.LoggingObserverConfig{
-			Logger: logger,
+			Logger:      logger,
+			EventLevels: buildEventLevels(cfg, logger.GetLevel()),
 		}), nil
 	case "noop", "":
 		return &service.NoOpApplicationObserver{}, nil
@@ -47,16 +48,7 @@ func NewLogger(cfg *ObservabilityConfig) zerolog.Logger {
 
 	defaultLevel := parseLogLevel(cfg.LogLevel)
 	writer := createWriter(cfg.LogFormat)
-	baseLogger := zerolog.New(writer).With().Timestamp().Logger().Level(defaultLevel)
-
-	eventLevels := buildEventLevels(cfg)
-	if len(eventLevels) > 0 {
-		baseLogger = baseLogger.Hook(&eventFilteringHook{
-			eventLevels: eventLevels,
-		})
-	}
-
-	return baseLogger
+	return zerolog.New(writer).With().Timestamp().Logger().Level(defaultLevel)
 }
 
 // newCompositeObserver creates a composite observer that delegates to multiple observers
@@ -77,40 +69,19 @@ func newCompositeObserver(cfg *ObservabilityConfig) (service.ApplicationObserver
 	return service.NewCompositeObserver(observers...), nil
 }
 
-// buildEventLevels reads per-event logging config into a level map.
-func buildEventLevels(cfg *ObservabilityConfig) map[string]zerolog.Level {
-	eventLevels := make(map[string]zerolog.Level)
-
-	applyEventConfig := func(name string, ec *EventLoggingConfig) {
-		if ec == nil {
-			return
-		}
-		if ec.Enabled != nil && !*ec.Enabled {
-			eventLevels[name] = zerolog.Disabled
-		} else if ec.LogLevel != "" {
-			eventLevels[name] = parseLogLevel(ec.LogLevel)
+// buildEventLevels creates a map of event-specific log levels from config.
+// Only events with explicit overrides are included; events inheriting the
+// base level are omitted so the observer uses its logger's default.
+func buildEventLevels(cfg *ObservabilityConfig, baseLevel zerolog.Level) map[string]zerolog.Level {
+	events := []string{"token_issuance", "token_exchange", "authz_check"}
+	levels := make(map[string]zerolog.Level)
+	for _, name := range events {
+		level := EventLevel(cfg, name, baseLevel)
+		if level != baseLevel {
+			levels[name] = level
 		}
 	}
-
-	applyEventConfig("token_issuance", cfg.TokenIssuance)
-	applyEventConfig("token_exchange", cfg.TokenExchange)
-	applyEventConfig("authz_check", cfg.AuthzCheck)
-
-	return eventLevels
-}
-
-// eventFilteringHook filters log events based on the "event" field and per-event log levels.
-type eventFilteringHook struct {
-	eventLevels map[string]zerolog.Level
-}
-
-func (h *eventFilteringHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
-	// zerolog hooks don't provide access to existing fields on the event,
-	// so per-event filtering for sub-loggers that already carry an "event" field
-	// is handled by the sub-logger's own level. This hook is a placeholder for
-	// future integration (e.g., via a custom writer that inspects JSON output).
-	// For now, per-event levels are applied when creating sub-loggers in
-	// probe/logging.go via EventLevel().
+	return levels
 }
 
 // EventLevel returns the configured level for a given event name, or the
