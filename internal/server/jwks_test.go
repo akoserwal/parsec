@@ -5,8 +5,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"github.com/rs/zerolog"
 	"testing"
+
+	"github.com/rs/zerolog"
 
 	"github.com/project-kessel/parsec/internal/service"
 )
