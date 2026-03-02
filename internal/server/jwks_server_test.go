@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
+	"github.com/rs/zerolog"
 	"net/http"
 	"testing"
 	"time"
@@ -60,7 +60,7 @@ func TestJWKSEndpoint(t *testing.T) {
 	env := startTestServer(t, Config{
 		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
+		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: zerolog.Nop()}),
 	})
 
 	t.Run("GET /v1/jwks.json", func(t *testing.T) {
@@ -142,7 +142,7 @@ func TestJWKSWithMultipleIssuers(t *testing.T) {
 	env := startTestServer(t, Config{
 		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
+		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: zerolog.Nop()}),
 	})
 
 	resp, err := env.HTTPClient.Get(env.HTTPBaseURL + "/v1/jwks.json")
@@ -203,7 +203,7 @@ func TestJWKSWithUnsignedIssuer(t *testing.T) {
 	env := startTestServer(t, Config{
 		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
+		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: zerolog.Nop()}),
 	})
 
 	resp, err := env.HTTPClient.Get(env.HTTPBaseURL + "/v1/jwks.json")

@@ -6,9 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
 
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/service"
@@ -61,6 +62,7 @@ type DualSlotRotatingSigner struct {
 
 	clock  clock.Clock
 	ticker clock.Ticker
+	logger zerolog.Logger
 }
 
 // DualSlotRotatingSignerConfig configures the DualSlotRotatingSigner
@@ -78,6 +80,9 @@ type DualSlotRotatingSignerConfig struct {
 	GracePeriod       time.Duration
 	CheckInterval     time.Duration
 	PrepareTimeout    time.Duration // How long to wait before retrying a stuck "preparing" state (default: 1 minute)
+
+	// Logger for key rotation events. If zero-value, uses zerolog.Nop().
+	Logger zerolog.Logger
 }
 
 // NewDualSlotRotatingSigner creates a new dual-slot rotating signer
@@ -124,6 +129,7 @@ func NewDualSlotRotatingSigner(cfg DualSlotRotatingSignerConfig) *DualSlotRotati
 		checkInterval:       checkInterval,
 		prepareTimeout:      prepareTimeout,
 		clock:               clk,
+		logger:              cfg.Logger,
 	}
 }
 
@@ -166,11 +172,10 @@ func (r *DualSlotRotatingSigner) Stop() {
 // doRotationCheck is called periodically by the ticker to check for rotation needs
 func (r *DualSlotRotatingSigner) doRotationCheck(ctx context.Context) {
 	if err := r.checkAndRotate(ctx); err != nil {
-		log.Printf("Error during key rotation check: %v", err)
+		r.logger.Error().Err(err).Msg("key rotation check failed")
 	}
-	// Update active key cache after each check (whether rotation happened or not)
 	if err := r.updateActiveKeyCache(ctx); err != nil {
-		log.Printf("Error updating active key cache: %v", err)
+		r.logger.Error().Err(err).Msg("active key cache update failed")
 	}
 }
 
@@ -357,14 +362,14 @@ func (r *DualSlotRotatingSigner) checkAndRotate(ctx context.Context) error {
 
 	_, err = r.slotStore.SaveSlot(ctx, targetSlot, storeVersion)
 	if errors.Is(err, ErrVersionMismatch) {
-		log.Printf("Another process completed rotation for slot %s, skipping", targetSlot.Position)
+		r.logger.Info().Str("slot", string(targetSlot.Position)).Msg("another process completed rotation, skipping")
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("failed to save slot: %w", err)
 	}
 
-	log.Printf("Completed rotation for slot %s", targetSlot.Position)
+	r.logger.Info().Str("slot", string(targetSlot.Position)).Msg("key rotation completed")
 
 	return nil
 }
@@ -502,26 +507,26 @@ func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context) error
 		// Get the KeyProvider that created this key
 		provider, ok := r.keyProviderRegistry[slot.KeyProviderID]
 		if !ok {
-			log.Printf("Warning: key provider %s not found for slot %s, skipping", slot.KeyProviderID, slot.Position)
+			r.logger.Warn().Str("provider", slot.KeyProviderID).Str("slot", string(slot.Position)).Msg("key provider not found, skipping")
 			continue
 		}
 
 		keyName := r.keyName(slot.Position)
 		handle, err := provider.GetKeyHandle(ctx, r.trustDomain, r.namespace, keyName)
 		if err != nil {
-			log.Printf("Warning: failed to get handle %s from key provider: %v", slot.Position, err)
+			r.logger.Warn().Err(err).Str("slot", string(slot.Position)).Msg("failed to get key handle")
 			continue
 		}
 
 		pubKey, err := handle.Public(ctx)
 		if err != nil {
-			log.Printf("Warning: failed to get public key for %s: %v", slot.Position, err)
+			r.logger.Warn().Err(err).Str("slot", string(slot.Position)).Msg("failed to get public key")
 			continue
 		}
 
 		thumbprintStr, err := ComputeThumbprint(pubKey)
 		if err != nil {
-			log.Printf("Warning: failed to compute thumbprint for key %s: %v", slot.Position, err)
+			r.logger.Warn().Err(err).Str("slot", string(slot.Position)).Msg("failed to compute thumbprint")
 			continue
 		}
 		thumbprint := KeyID(thumbprintStr)
@@ -529,7 +534,7 @@ func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context) error
 
 		_, algStr, err := handle.Metadata(ctx)
 		if err != nil {
-			log.Printf("Warning: failed to get metadata for %s: %v", slot.Position, err)
+			r.logger.Warn().Err(err).Str("slot", string(slot.Position)).Msg("failed to get key metadata")
 			continue
 		}
 		alg := Algorithm(algStr)
