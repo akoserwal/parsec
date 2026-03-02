@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"github.com/rs/zerolog"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 
 	"github.com/project-kessel/parsec/internal/issuer"
 	"github.com/project-kessel/parsec/internal/keys"

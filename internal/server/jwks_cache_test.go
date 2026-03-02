@@ -5,9 +5,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"github.com/rs/zerolog"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/service"
