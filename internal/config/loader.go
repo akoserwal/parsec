@@ -14,6 +14,7 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/posflag"
 	"github.com/knadh/koanf/v2"
+	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
 )
 
@@ -22,6 +23,7 @@ import (
 type Loader struct {
 	k          *koanf.Koanf
 	configPath string
+	logger     zerolog.Logger
 }
 
 // NewLoader creates a new configuration loader that reads from a file
@@ -123,7 +125,14 @@ func newLoader(configPath string, flags *pflag.FlagSet) (*Loader, error) {
 	return &Loader{
 		k:          k,
 		configPath: configPath,
+		logger:     zerolog.Nop(),
 	}, nil
+}
+
+// SetLogger sets the logger for the loader (used for config watch/reload messages).
+// Call this after the logger is created from the loaded config.
+func (l *Loader) SetLogger(logger zerolog.Logger) {
+	l.logger = logger
 }
 
 // Get unmarshals the configuration into a Config struct
@@ -153,53 +162,46 @@ func (l *Loader) Watch(ctx context.Context, onChange func(*Config) error) error 
 	// Set up file watcher
 	if err := fp.Watch(func(event interface{}, err error) {
 		if err != nil {
-			// Log error but continue watching
-			fmt.Printf("config watch error: %v\n", err)
+			l.logger.Error().Err(err).Msg("config watch error")
 			return
 		}
 
-		// Reload the config
 		parser, err := getParserForFile(l.configPath)
 		if err != nil {
-			fmt.Printf("config parser error: %v\n", err)
+			l.logger.Error().Err(err).Msg("config parser error")
 			return
 		}
 
-		// Create new koanf instance for reload (same precedence as startup)
 		k := koanf.New(".")
 		if err := k.Load(confmap.Provider(getDefaults(), "."), nil); err != nil {
-			fmt.Printf("config defaults reload error: %v\n", err)
+			l.logger.Error().Err(err).Msg("config defaults reload error")
 			return
 		}
 		if err := k.Load(fp, parser); err != nil {
-			fmt.Printf("config reload error: %v\n", err)
+			l.logger.Error().Err(err).Msg("config reload error")
 			return
 		}
 
-		// Reload env vars
 		if err := k.Load(env.Provider(".", env.Opt{
 			Prefix: "PARSEC_",
 			TransformFunc: func(k, v string) (string, any) {
 				return envTransform(k), v
 			},
 		}), nil); err != nil {
-			fmt.Printf("env reload error: %v\n", err)
+			l.logger.Error().Err(err).Msg("env reload error")
 			return
 		}
 
-		// Unmarshal new config
 		var cfg Config
 		if err := k.Unmarshal("", &cfg); err != nil {
-			fmt.Printf("config unmarshal error: %v\n", err)
+			l.logger.Error().Err(err).Msg("config unmarshal error")
 			return
 		}
 
-		// Update loader's koanf instance
 		l.k = k
 
-		// Call onChange callback
 		if err := onChange(&cfg); err != nil {
-			fmt.Printf("config onChange error: %v\n", err)
+			l.logger.Error().Err(err).Msg("config onChange error")
 		}
 	}); err != nil {
 		return fmt.Errorf("failed to watch config file: %w", err)

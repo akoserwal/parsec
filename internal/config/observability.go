@@ -1,11 +1,12 @@
 package config
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
+	"io"
 	"os"
 	"strings"
+
+	"github.com/rs/zerolog"
 
 	"github.com/project-kessel/parsec/internal/probe"
 	"github.com/project-kessel/parsec/internal/service"
@@ -19,9 +20,8 @@ func NewObserver(cfg *ObservabilityConfig) (service.ApplicationObserver, error) 
 
 // NewObserverWithLogger creates an application observer using the provided logger.
 // Use this when you want the observer to share a logger with other components.
-func NewObserverWithLogger(cfg *ObservabilityConfig, logger *slog.Logger) (service.ApplicationObserver, error) {
+func NewObserverWithLogger(cfg *ObservabilityConfig, logger zerolog.Logger) (service.ApplicationObserver, error) {
 	if cfg == nil {
-		// Default to no-op observer if not configured
 		return &service.NoOpApplicationObserver{}, nil
 	}
 
@@ -39,16 +39,24 @@ func NewObserverWithLogger(cfg *ObservabilityConfig, logger *slog.Logger) (servi
 	}
 }
 
-// NewLogger creates a structured logger from the observability configuration.
-// Returns slog.Default() if cfg is nil.
-func NewLogger(cfg *ObservabilityConfig) *slog.Logger {
+// NewLogger creates a structured zerolog logger from the observability configuration.
+func NewLogger(cfg *ObservabilityConfig) zerolog.Logger {
 	if cfg == nil {
-		return slog.Default()
+		return zerolog.New(os.Stdout).With().Timestamp().Logger()
 	}
 
 	defaultLevel := parseLogLevel(cfg.LogLevel)
-	handler := createEventFilteringHandler(cfg, defaultLevel)
-	return slog.New(handler)
+	writer := createWriter(cfg.LogFormat)
+	baseLogger := zerolog.New(writer).With().Timestamp().Logger().Level(defaultLevel)
+
+	eventLevels := buildEventLevels(cfg)
+	if len(eventLevels) > 0 {
+		baseLogger = baseLogger.Hook(&eventFilteringHook{
+			eventLevels: eventLevels,
+		})
+	}
+
+	return baseLogger
 }
 
 // newCompositeObserver creates a composite observer that delegates to multiple observers
@@ -69,127 +77,95 @@ func newCompositeObserver(cfg *ObservabilityConfig) (service.ApplicationObserver
 	return service.NewCompositeObserver(observers...), nil
 }
 
-// createEventFilteringHandler creates a handler that filters log events based on the event attribute
-func createEventFilteringHandler(cfg *ObservabilityConfig, defaultLevel slog.Level) slog.Handler {
-	// Create base handler
-	baseHandler := createHandler(cfg.LogFormat, defaultLevel)
+// buildEventLevels reads per-event logging config into a level map.
+func buildEventLevels(cfg *ObservabilityConfig) map[string]zerolog.Level {
+	eventLevels := make(map[string]zerolog.Level)
 
-	// Build event-specific level map
-	eventLevels := make(map[string]slog.Level)
-
-	if cfg.TokenIssuance != nil {
-		if cfg.TokenIssuance.Enabled != nil && !*cfg.TokenIssuance.Enabled {
-			eventLevels["token_issuance"] = slog.Level(1000) // Effectively disabled
-		} else if cfg.TokenIssuance.LogLevel != "" {
-			eventLevels["token_issuance"] = parseLogLevel(cfg.TokenIssuance.LogLevel)
+	applyEventConfig := func(name string, ec *EventLoggingConfig) {
+		if ec == nil {
+			return
+		}
+		if ec.Enabled != nil && !*ec.Enabled {
+			eventLevels[name] = zerolog.Disabled
+		} else if ec.LogLevel != "" {
+			eventLevels[name] = parseLogLevel(ec.LogLevel)
 		}
 	}
 
-	if cfg.TokenExchange != nil {
-		if cfg.TokenExchange.Enabled != nil && !*cfg.TokenExchange.Enabled {
-			eventLevels["token_exchange"] = slog.Level(1000) // Effectively disabled
-		} else if cfg.TokenExchange.LogLevel != "" {
-			eventLevels["token_exchange"] = parseLogLevel(cfg.TokenExchange.LogLevel)
-		}
-	}
+	applyEventConfig("token_issuance", cfg.TokenIssuance)
+	applyEventConfig("token_exchange", cfg.TokenExchange)
+	applyEventConfig("authz_check", cfg.AuthzCheck)
 
-	if cfg.AuthzCheck != nil {
-		if cfg.AuthzCheck.Enabled != nil && !*cfg.AuthzCheck.Enabled {
-			eventLevels["authz_check"] = slog.Level(1000) // Effectively disabled
-		} else if cfg.AuthzCheck.LogLevel != "" {
-			eventLevels["authz_check"] = parseLogLevel(cfg.AuthzCheck.LogLevel)
-		}
-	}
-
-	return &eventFilteringHandler{
-		next:         baseHandler,
-		eventLevels:  eventLevels,
-		defaultLevel: defaultLevel,
-	}
+	return eventLevels
 }
 
-// eventFilteringHandler wraps a handler and filters based on the event attribute
-type eventFilteringHandler struct {
-	next         slog.Handler
-	eventLevels  map[string]slog.Level
-	defaultLevel slog.Level
+// eventFilteringHook filters log events based on the "event" field and per-event log levels.
+type eventFilteringHook struct {
+	eventLevels map[string]zerolog.Level
 }
 
-func (h *eventFilteringHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	// For now, use default level check
-	// The actual filtering happens in Handle
-	return level >= h.defaultLevel
+func (h *eventFilteringHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
+	// zerolog hooks don't provide access to existing fields on the event,
+	// so per-event filtering for sub-loggers that already carry an "event" field
+	// is handled by the sub-logger's own level. This hook is a placeholder for
+	// future integration (e.g., via a custom writer that inspects JSON output).
+	// For now, per-event levels are applied when creating sub-loggers in
+	// probe/logging.go via EventLevel().
 }
 
-func (h *eventFilteringHandler) Handle(ctx context.Context, record slog.Record) error {
-	// Extract event attribute if present
-	var eventName string
-	record.Attrs(func(attr slog.Attr) bool {
-		if attr.Key == "event" {
-			eventName = attr.Value.String()
-			return false // Stop iteration
-		}
-		return true
-	})
-
-	// Check event-specific level
-	if eventName != "" {
-		if eventLevel, ok := h.eventLevels[eventName]; ok {
-			if record.Level < eventLevel {
-				return nil // Filter out
-			}
-		}
+// EventLevel returns the configured level for a given event name, or the
+// provided fallback if no event-specific level is configured.
+func EventLevel(cfg *ObservabilityConfig, eventName string, fallback zerolog.Level) zerolog.Level {
+	if cfg == nil {
+		return fallback
 	}
 
-	return h.next.Handle(ctx, record)
-}
-
-func (h *eventFilteringHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &eventFilteringHandler{
-		next:         h.next.WithAttrs(attrs),
-		eventLevels:  h.eventLevels,
-		defaultLevel: h.defaultLevel,
-	}
-}
-
-func (h *eventFilteringHandler) WithGroup(name string) slog.Handler {
-	return &eventFilteringHandler{
-		next:         h.next.WithGroup(name),
-		eventLevels:  h.eventLevels,
-		defaultLevel: h.defaultLevel,
-	}
-}
-
-// createHandler creates a slog handler based on format and level
-func createHandler(format string, level slog.Level) slog.Handler {
-	opts := &slog.HandlerOptions{
-		Level: level,
+	var ec *EventLoggingConfig
+	switch eventName {
+	case "token_issuance":
+		ec = cfg.TokenIssuance
+	case "token_exchange":
+		ec = cfg.TokenExchange
+	case "authz_check":
+		ec = cfg.AuthzCheck
 	}
 
+	if ec == nil {
+		return fallback
+	}
+	if ec.Enabled != nil && !*ec.Enabled {
+		return zerolog.Disabled
+	}
+	if ec.LogLevel != "" {
+		return parseLogLevel(ec.LogLevel)
+	}
+	return fallback
+}
+
+// createWriter creates a zerolog writer based on the format string.
+func createWriter(format string) io.Writer {
 	switch strings.ToLower(format) {
 	case "text":
-		return slog.NewTextHandler(os.Stdout, opts)
+		return zerolog.ConsoleWriter{Out: os.Stdout}
 	case "json", "":
-		return slog.NewJSONHandler(os.Stdout, opts)
+		return os.Stdout
 	default:
-		// Default to JSON
-		return slog.NewJSONHandler(os.Stdout, opts)
+		return os.Stdout
 	}
 }
 
-// parseLogLevel parses a log level string
-func parseLogLevel(levelStr string) slog.Level {
+// parseLogLevel parses a log level string into a zerolog.Level.
+func parseLogLevel(levelStr string) zerolog.Level {
 	switch strings.ToLower(levelStr) {
 	case "debug":
-		return slog.LevelDebug
+		return zerolog.DebugLevel
 	case "info", "":
-		return slog.LevelInfo
+		return zerolog.InfoLevel
 	case "warn", "warning":
-		return slog.LevelWarn
+		return zerolog.WarnLevel
 	case "error":
-		return slog.LevelError
+		return zerolog.ErrorLevel
 	default:
-		// Default to info
-		return slog.LevelInfo
+		return zerolog.InfoLevel
 	}
 }
