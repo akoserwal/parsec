@@ -63,10 +63,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 1. Determine config file path
 	configPath := configFile
 	if configPath == "" {
-		// Check environment variable
 		configPath = os.Getenv("PARSEC_CONFIG")
 	}
-	// If still empty, configPath remains empty and we'll use env vars/flags only
 
 	// 2. Load configuration (file + env vars + flags)
 	loader, err := config.NewLoaderWithFlags(configPath, cmd.Flags())
@@ -153,40 +151,36 @@ func runServe(cmd *cobra.Command, args []string) error {
 		AuthzServer:    authzServer,
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
+		Logger:         logger,
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
 	}
 
 	// 8a. All components initialized — signal readiness via gRPC health service.
-	// Per-service statuses transition from NOT_SERVING to SERVING.
 	srv.SetReady()
 
 	grpcAddr := grpcListener.Addr().String()
 	httpAddr := httpListener.Addr().String()
-	fmt.Println("parsec is running")
-	fmt.Printf("  gRPC (ext_authz):      %s\n", grpcAddr)
-	fmt.Printf("  HTTP (token exchange): http://%s/v1/token\n", httpAddr)
-	fmt.Printf("  HTTP (JWKS):           http://%s/v1/jwks.json\n", httpAddr)
-	fmt.Printf("                         http://%s/.well-known/jwks.json\n", httpAddr)
-	fmt.Printf("  Health (gRPC):         %s (grpc.health.v1.Health)\n", grpcAddr)
-	fmt.Printf("  Health (HTTP live):    http://%s/healthz/live\n", httpAddr)
-	fmt.Printf("  Health (HTTP ready):   http://%s/healthz/ready\n", httpAddr)
-	fmt.Printf("  Trust Domain:          %s\n", provider.TrustDomain())
-	fmt.Printf("  Config:                %s\n", configPath)
+	logger.Info().
+		Str("grpc_addr", grpcAddr).
+		Str("http_addr", httpAddr).
+		Str("trust_domain", provider.TrustDomain()).
+		Str("config", configPath).
+		Msg("parsec is running")
 
 	// 9. Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	<-sigCh
 
-	fmt.Println("\nShutting down...")
+	logger.Info().Msg("Shutting down")
 
 	// 10. Graceful shutdown
 	if err := srv.Stop(ctx); err != nil {
 		return fmt.Errorf("error during shutdown: %w", err)
 	}
 
-	fmt.Println("Shutdown complete")
+	logger.Info().Msg("Shutdown complete")
 	return nil
 }

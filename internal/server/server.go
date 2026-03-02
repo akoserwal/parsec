@@ -9,6 +9,7 @@ import (
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
@@ -42,6 +43,7 @@ type Server struct {
 	grpcListener    net.Listener
 	httpListener    net.Listener
 	grpcDialOptions []grpc.DialOption
+	logger          zerolog.Logger
 
 	authzServer    *AuthzServer
 	exchangeServer *ExchangeServer
@@ -62,6 +64,9 @@ type Config struct {
 	AuthzServer    *AuthzServer
 	ExchangeServer *ExchangeServer
 	JWKSServer     *JWKSServer
+
+	// Logger for server lifecycle events. If zero-value, uses zerolog.Nop().
+	Logger zerolog.Logger
 }
 
 // New creates a new server with the given configuration
@@ -70,6 +75,7 @@ func New(cfg Config) *Server {
 		grpcListener:    cfg.GRPCListener,
 		httpListener:    cfg.HTTPListener,
 		grpcDialOptions: cfg.GRPCDialOptions,
+		logger:          cfg.Logger,
 		authzServer:     cfg.AuthzServer,
 		exchangeServer:  cfg.ExchangeServer,
 		jwksServer:      cfg.JWKSServer,
@@ -143,12 +149,12 @@ func (s *Server) Start(ctx context.Context) error {
 	// that an early-return error never orphans a running goroutine.
 	go func() {
 		if err := s.grpcServer.Serve(s.grpcListener); err != nil {
-			fmt.Printf("gRPC server error: %v\n", err)
+			s.logger.Error().Err(err).Msg("gRPC server error")
 		}
 	}()
 	go func() {
 		if err := s.httpServer.Serve(s.httpListener); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("HTTP server error: %v\n", err)
+			s.logger.Error().Err(err).Msg("HTTP server error")
 		}
 	}()
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
+	"github.com/rs/zerolog"
 	"net"
 	"net/http"
 	"testing"
@@ -134,7 +134,7 @@ func stubServerConfig() Config {
 	return Config{
 		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
+		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: zerolog.Nop()}),
 	}
 }
 

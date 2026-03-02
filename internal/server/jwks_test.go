@@ -5,7 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"log/slog"
+	"github.com/rs/zerolog"
 	"testing"
 
 	"github.com/project-kessel/parsec/internal/service"
@@ -18,7 +18,7 @@ func TestJWKSServer(t *testing.T) {
 		emptyRegistry := service.NewSimpleRegistry()
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: emptyRegistry,
-			Logger:         slog.Default(),
+			Logger:         zerolog.Nop(),
 		})
 
 		resp, err := jwksServer.GetJWKS(ctx, nil)
@@ -54,7 +54,7 @@ func TestJWKSServer(t *testing.T) {
 
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: registry,
-			Logger:         slog.Default(),
+			Logger:         zerolog.Nop(),
 		})
 
 		resp, err := jwksServer.GetJWKS(ctx, nil)
@@ -122,7 +122,7 @@ func TestJWKSServer(t *testing.T) {
 
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: registry,
-			Logger:         slog.Default(),
+			Logger:         zerolog.Nop(),
 		})
 
 		resp, err := jwksServer.GetJWKS(ctx, nil)
@@ -159,7 +159,7 @@ func TestJWKSServer(t *testing.T) {
 
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: registry,
-			Logger:         slog.Default(),
+			Logger:         zerolog.Nop(),
 		})
 
 		resp, err := jwksServer.GetJWKS(ctx, nil)
@@ -194,7 +194,7 @@ func TestJWKSServer(t *testing.T) {
 
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: registry,
-			Logger:         slog.Default(),
+			Logger:         zerolog.Nop(),
 		})
 
 		resp, err := jwksServer.GetJWKS(ctx, nil)
@@ -220,7 +220,7 @@ func TestJWKSServer(t *testing.T) {
 
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: registry,
-			Logger:         slog.Default(),
+			Logger:         zerolog.Nop(),
 		})
 
 		resp, err := jwksServer.GetJWKS(ctx, nil)
