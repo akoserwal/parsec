@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"github.com/rs/zerolog"
 	"net"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
