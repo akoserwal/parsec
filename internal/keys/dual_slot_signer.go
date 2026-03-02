@@ -81,7 +81,7 @@ type DualSlotRotatingSignerConfig struct {
 	CheckInterval     time.Duration
 	PrepareTimeout    time.Duration // How long to wait before retrying a stuck "preparing" state (default: 1 minute)
 
-	// Logger for key rotation events. If zero-value, uses zerolog.Nop().
+	// Logger for key rotation events. Zero-value silently discards output.
 	Logger zerolog.Logger
 }
 

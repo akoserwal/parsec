@@ -65,7 +65,7 @@ type Config struct {
 	ExchangeServer *ExchangeServer
 	JWKSServer     *JWKSServer
 
-	// Logger for server lifecycle events. If zero-value, uses zerolog.Nop().
+	// Logger for server lifecycle events. Zero-value silently discards output.
 	Logger zerolog.Logger
 }
 
