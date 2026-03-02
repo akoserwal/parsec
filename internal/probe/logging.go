@@ -14,13 +14,20 @@ import (
 // loggingObserver creates request-scoped logging probes
 type loggingObserver struct {
 	service.NoOpApplicationObserver
-	logger zerolog.Logger
+	logger      zerolog.Logger
+	eventLevels map[string]zerolog.Level
 }
 
 // LoggingObserverConfig configures the logging observer
 type LoggingObserverConfig struct {
 	// Logger is the base logger to use.
 	Logger zerolog.Logger
+
+	// EventLevels overrides the log level for specific event types.
+	// Keys are event names (e.g. "token_issuance"), values are the
+	// zerolog.Level to apply. Events not in the map inherit the base
+	// logger's level. Use zerolog.Disabled to suppress an event entirely.
+	EventLevels map[string]zerolog.Level
 }
 
 // NewLoggingObserver creates an application observer that logs all observability events
@@ -39,8 +46,20 @@ func NewLoggingObserverWithConfig(cfg LoggingObserverConfig) service.Application
 	}
 
 	return &loggingObserver{
-		logger: logger,
+		logger:      logger,
+		eventLevels: cfg.EventLevels,
 	}
+}
+
+// probeLogger creates a scoped sub-logger for the given event name.
+// If a per-event level is configured, the sub-logger's level is set
+// accordingly; otherwise it inherits the base logger's level.
+func (o *loggingObserver) probeLogger(eventName string) zerolog.Logger {
+	l := o.logger.With().Str("event", eventName).Logger()
+	if level, ok := o.eventLevels[eventName]; ok {
+		l = l.Level(level)
+	}
+	return l
 }
 
 func (o *loggingObserver) TokenIssuanceStarted(
@@ -50,9 +69,9 @@ func (o *loggingObserver) TokenIssuanceStarted(
 	scope string,
 	tokenTypes []service.TokenType,
 ) (context.Context, service.TokenIssuanceProbe) {
-	probeLogger := o.logger.With().Str("event", "token_issuance").Logger()
+	pl := o.probeLogger("token_issuance")
 
-	event := probeLogger.Debug().
+	event := pl.Debug().
 		Str("scope", scope).
 		Interface("token_types", tokenTypes)
 
@@ -71,7 +90,7 @@ func (o *loggingObserver) TokenIssuanceStarted(
 	event.Msg("Starting token issuance")
 
 	return ctx, &loggingTokenIssuanceProbe{
-		logger: probeLogger,
+		logger: pl,
 	}
 }
 
@@ -126,9 +145,9 @@ func (o *loggingObserver) TokenExchangeStarted(
 	audience string,
 	scope string,
 ) (context.Context, service.TokenExchangeProbe) {
-	probeLogger := o.logger.With().Str("event", "token_exchange").Logger()
+	pl := o.probeLogger("token_exchange")
 
-	probeLogger.Debug().
+	pl.Debug().
 		Str("grant_type", grantType).
 		Str("requested_token_type", requestedTokenType).
 		Str("audience", audience).
@@ -136,7 +155,7 @@ func (o *loggingObserver) TokenExchangeStarted(
 		Msg("Starting token exchange")
 
 	return ctx, &loggingTokenExchangeProbe{
-		logger: probeLogger,
+		logger: pl,
 	}
 }
 
@@ -196,12 +215,12 @@ func (p *loggingTokenExchangeProbe) End() {
 func (o *loggingObserver) AuthzCheckStarted(
 	ctx context.Context,
 ) (context.Context, service.AuthzCheckProbe) {
-	probeLogger := o.logger.With().Str("event", "authz_check").Logger()
+	pl := o.probeLogger("authz_check")
 
-	probeLogger.Debug().Msg("Starting authorization check")
+	pl.Debug().Msg("Starting authorization check")
 
 	return ctx, &loggingAuthzCheckProbe{
-		logger: probeLogger,
+		logger: pl,
 	}
 }
 
