@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -148,7 +149,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// All fallible setup is complete. Launch the serve goroutines last so
 	// that an early-return error never orphans a running goroutine.
 	go func() {
-		if err := s.grpcServer.Serve(s.grpcListener); err != nil {
+		if err := s.grpcServer.Serve(s.grpcListener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			s.logger.Error().Err(err).Msg("gRPC server error")
 		}
 	}()
