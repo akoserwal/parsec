@@ -165,6 +165,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	logger.Info().
 		Str("grpc_addr", grpcAddr).
 		Str("http_addr", httpAddr).
+		Str("token_exchange_url", "http://"+httpAddr+"/v1/token").
+		Str("jwks_url", "http://"+httpAddr+"/v1/jwks.json").
+		Str("jwks_wellknown_url", "http://"+httpAddr+"/.well-known/jwks.json").
+		Str("health_grpc", grpcAddr+" (grpc.health.v1.Health)").
 		Str("trust_domain", provider.TrustDomain()).
 		Str("config", configPath).
 		Msg("parsec is running")
