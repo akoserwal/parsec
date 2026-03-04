@@ -28,8 +28,9 @@ func NewObserverWithLogger(cfg *ObservabilityConfig, logger zerolog.Logger) (ser
 	switch cfg.Type {
 	case "logging":
 		return probe.NewLoggingObserverWithConfig(probe.LoggingObserverConfig{
-			Logger:      logger,
-			EventLevels: buildEventLevels(cfg, logger.GetLevel()),
+			TokenIssuanceLogger: eventLogger(logger, "token_issuance", cfg.TokenIssuance),
+			TokenExchangeLogger: eventLogger(logger, "token_exchange", cfg.TokenExchange),
+			AuthzCheckLogger:    eventLogger(logger, "authz_check", cfg.AuthzCheck),
 		}), nil
 	case "noop", "":
 		return &service.NoOpApplicationObserver{}, nil
@@ -69,48 +70,21 @@ func newCompositeObserver(cfg *ObservabilityConfig) (service.ApplicationObserver
 	return service.NewCompositeObserver(observers...), nil
 }
 
-// buildEventLevels creates a map of event-specific log levels from config.
-// Only events with explicit overrides are included; events inheriting the
-// base level are omitted so the observer uses its logger's default.
-func buildEventLevels(cfg *ObservabilityConfig, baseLevel zerolog.Level) map[string]zerolog.Level {
-	events := []string{"token_issuance", "token_exchange", "authz_check"}
-	levels := make(map[string]zerolog.Level)
-	for _, name := range events {
-		level := EventLevel(cfg, name, baseLevel)
-		if level != baseLevel {
-			levels[name] = level
-		}
+// eventLogger creates a pre-configured sub-logger for a specific event type.
+// The returned logger has the "event" field baked in and its level set according
+// to the per-event config. If eventCfg is nil the logger inherits the base level.
+func eventLogger(base zerolog.Logger, eventName string, eventCfg *EventLoggingConfig) zerolog.Logger {
+	logger := base.With().Str("event", eventName).Logger()
+	if eventCfg == nil {
+		return logger
 	}
-	return levels
-}
-
-// EventLevel returns the configured level for a given event name, or the
-// provided fallback if no event-specific level is configured.
-func EventLevel(cfg *ObservabilityConfig, eventName string, fallback zerolog.Level) zerolog.Level {
-	if cfg == nil {
-		return fallback
+	if eventCfg.Enabled != nil && !*eventCfg.Enabled {
+		return logger.Level(zerolog.Disabled)
 	}
-
-	var ec *EventLoggingConfig
-	switch eventName {
-	case "token_issuance":
-		ec = cfg.TokenIssuance
-	case "token_exchange":
-		ec = cfg.TokenExchange
-	case "authz_check":
-		ec = cfg.AuthzCheck
+	if eventCfg.LogLevel != "" {
+		return logger.Level(parseLogLevel(eventCfg.LogLevel))
 	}
-
-	if ec == nil {
-		return fallback
-	}
-	if ec.Enabled != nil && !*ec.Enabled {
-		return zerolog.Disabled
-	}
-	if ec.LogLevel != "" {
-		return parseLogLevel(ec.LogLevel)
-	}
-	return fallback
+	return logger
 }
 
 // createWriter creates a zerolog writer based on the format string.
