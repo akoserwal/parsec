@@ -2,7 +2,6 @@ package probe
 
 import (
 	"context"
-	"os"
 
 	"github.com/rs/zerolog"
 
@@ -11,55 +10,42 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-// loggingObserver creates request-scoped logging probes
+// loggingObserver creates request-scoped logging probes.
+// Each event type has a pre-built sub-logger with its event name and
+// per-event log level baked in at construction time.
 type loggingObserver struct {
 	service.NoOpApplicationObserver
-	logger      zerolog.Logger
-	eventLevels map[string]zerolog.Level
+	tokenIssuanceLogger zerolog.Logger
+	tokenExchangeLogger zerolog.Logger
+	authzCheckLogger    zerolog.Logger
 }
 
-// LoggingObserverConfig configures the logging observer
+// LoggingObserverConfig configures the logging observer.
+// Each field is a pre-configured zerolog.Logger for one event type,
+// with the "event" field and per-event level already applied.
 type LoggingObserverConfig struct {
-	// Logger is the base logger to use.
-	Logger zerolog.Logger
-
-	// EventLevels overrides the log level for specific event types.
-	// Keys are event names (e.g. "token_issuance"), values are the
-	// zerolog.Level to apply. Events not in the map inherit the base
-	// logger's level. Use zerolog.Disabled to suppress an event entirely.
-	EventLevels map[string]zerolog.Level
+	TokenIssuanceLogger zerolog.Logger
+	TokenExchangeLogger zerolog.Logger
+	AuthzCheckLogger    zerolog.Logger
 }
 
 // NewLoggingObserver creates an application observer that logs all observability events
-// using structured logging with zerolog.
+// using structured logging with zerolog. All events inherit the base logger's level.
 func NewLoggingObserver(logger zerolog.Logger) service.ApplicationObserver {
 	return NewLoggingObserverWithConfig(LoggingObserverConfig{
-		Logger: logger,
+		TokenIssuanceLogger: logger.With().Str("event", "token_issuance").Logger(),
+		TokenExchangeLogger: logger.With().Str("event", "token_exchange").Logger(),
+		AuthzCheckLogger:    logger.With().Str("event", "authz_check").Logger(),
 	})
 }
 
-// NewLoggingObserverWithConfig creates a logging observer with custom configuration
+// NewLoggingObserverWithConfig creates a logging observer with pre-configured per-event loggers.
 func NewLoggingObserverWithConfig(cfg LoggingObserverConfig) service.ApplicationObserver {
-	logger := cfg.Logger
-	if logger.GetLevel() == zerolog.Disabled {
-		logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
-	}
-
 	return &loggingObserver{
-		logger:      logger,
-		eventLevels: cfg.EventLevels,
+		tokenIssuanceLogger: cfg.TokenIssuanceLogger,
+		tokenExchangeLogger: cfg.TokenExchangeLogger,
+		authzCheckLogger:    cfg.AuthzCheckLogger,
 	}
-}
-
-// probeLogger creates a scoped sub-logger for the given event name.
-// If a per-event level is configured, the sub-logger's level is set
-// accordingly; otherwise it inherits the base logger's level.
-func (o *loggingObserver) probeLogger(eventName string) zerolog.Logger {
-	l := o.logger.With().Str("event", eventName).Logger()
-	if level, ok := o.eventLevels[eventName]; ok {
-		l = l.Level(level)
-	}
-	return l
 }
 
 func (o *loggingObserver) TokenIssuanceStarted(
@@ -69,9 +55,7 @@ func (o *loggingObserver) TokenIssuanceStarted(
 	scope string,
 	tokenTypes []service.TokenType,
 ) (context.Context, service.TokenIssuanceProbe) {
-	pl := o.probeLogger("token_issuance")
-
-	event := pl.Debug().
+	event := o.tokenIssuanceLogger.Debug().
 		Str("scope", scope).
 		Interface("token_types", tokenTypes)
 
@@ -90,7 +74,7 @@ func (o *loggingObserver) TokenIssuanceStarted(
 	event.Msg("Starting token issuance")
 
 	return ctx, &loggingTokenIssuanceProbe{
-		logger: pl,
+		logger: o.tokenIssuanceLogger,
 	}
 }
 
@@ -145,9 +129,7 @@ func (o *loggingObserver) TokenExchangeStarted(
 	audience string,
 	scope string,
 ) (context.Context, service.TokenExchangeProbe) {
-	pl := o.probeLogger("token_exchange")
-
-	pl.Debug().
+	o.tokenExchangeLogger.Debug().
 		Str("grant_type", grantType).
 		Str("requested_token_type", requestedTokenType).
 		Str("audience", audience).
@@ -155,7 +137,7 @@ func (o *loggingObserver) TokenExchangeStarted(
 		Msg("Starting token exchange")
 
 	return ctx, &loggingTokenExchangeProbe{
-		logger: pl,
+		logger: o.tokenExchangeLogger,
 	}
 }
 
@@ -215,12 +197,10 @@ func (p *loggingTokenExchangeProbe) End() {
 func (o *loggingObserver) AuthzCheckStarted(
 	ctx context.Context,
 ) (context.Context, service.AuthzCheckProbe) {
-	pl := o.probeLogger("authz_check")
-
-	pl.Debug().Msg("Starting authorization check")
+	o.authzCheckLogger.Debug().Msg("Starting authorization check")
 
 	return ctx, &loggingAuthzCheckProbe{
-		logger: pl,
+		logger: o.authzCheckLogger,
 	}
 }
 
