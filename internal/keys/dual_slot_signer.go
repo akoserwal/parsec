@@ -9,8 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/service"
 )
@@ -60,9 +58,9 @@ type DualSlotRotatingSigner struct {
 	activeAlg        Algorithm           // JWT Algorithm
 	publicKeys       []service.PublicKey // All non-expired public keys
 
-	clock  clock.Clock
-	ticker clock.Ticker
-	logger zerolog.Logger
+	clock    clock.Clock
+	ticker   clock.Ticker
+	observer KeyRotationObserver
 }
 
 // DualSlotRotatingSignerConfig configures the DualSlotRotatingSigner
@@ -81,8 +79,8 @@ type DualSlotRotatingSignerConfig struct {
 	CheckInterval     time.Duration
 	PrepareTimeout    time.Duration // How long to wait before retrying a stuck "preparing" state (default: 1 minute)
 
-	// Logger for key rotation events. Zero-value silently discards output.
-	Logger zerolog.Logger
+	// Observer for key rotation events. Nil means no events are emitted.
+	Observer KeyRotationObserver
 }
 
 // NewDualSlotRotatingSigner creates a new dual-slot rotating signer
@@ -129,7 +127,7 @@ func NewDualSlotRotatingSigner(cfg DualSlotRotatingSignerConfig) *DualSlotRotati
 		checkInterval:       checkInterval,
 		prepareTimeout:      prepareTimeout,
 		clock:               clk,
-		logger:              cfg.Logger,
+		observer:            cfg.Observer,
 	}
 }
 
@@ -172,10 +170,14 @@ func (r *DualSlotRotatingSigner) Stop() {
 // doRotationCheck is called periodically by the ticker to check for rotation needs
 func (r *DualSlotRotatingSigner) doRotationCheck(ctx context.Context) {
 	if err := r.checkAndRotate(ctx); err != nil {
-		r.logger.Error().Err(err).Msg("key rotation check failed")
+		if r.observer != nil {
+			r.observer.RotationCheckFailed(err)
+		}
 	}
 	if err := r.updateActiveKeyCache(ctx); err != nil {
-		r.logger.Error().Err(err).Msg("active key cache update failed")
+		if r.observer != nil {
+			r.observer.ActiveKeyCacheUpdateFailed(err)
+		}
 	}
 }
 
@@ -362,14 +364,18 @@ func (r *DualSlotRotatingSigner) checkAndRotate(ctx context.Context) error {
 
 	_, err = r.slotStore.SaveSlot(ctx, targetSlot, storeVersion)
 	if errors.Is(err, ErrVersionMismatch) {
-		r.logger.Info().Str("slot", string(targetSlot.Position)).Msg("another process completed rotation, skipping")
+		if r.observer != nil {
+			r.observer.RotationSkippedVersionRace(string(targetSlot.Position))
+		}
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("failed to save slot: %w", err)
 	}
 
-	r.logger.Info().Str("slot", string(targetSlot.Position)).Msg("key rotation completed")
+	if r.observer != nil {
+		r.observer.RotationCompleted(string(targetSlot.Position))
+	}
 
 	return nil
 }
@@ -507,26 +513,34 @@ func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context) error
 		// Get the KeyProvider that created this key
 		provider, ok := r.keyProviderRegistry[slot.KeyProviderID]
 		if !ok {
-			r.logger.Warn().Str("provider", slot.KeyProviderID).Str("slot", string(slot.Position)).Msg("key provider not found, skipping")
+			if r.observer != nil {
+				r.observer.KeyProviderNotFound(slot.KeyProviderID, string(slot.Position))
+			}
 			continue
 		}
 
 		keyName := r.keyName(slot.Position)
 		handle, err := provider.GetKeyHandle(ctx, r.trustDomain, r.namespace, keyName)
 		if err != nil {
-			r.logger.Warn().Err(err).Str("slot", string(slot.Position)).Msg("failed to get key handle")
+			if r.observer != nil {
+				r.observer.KeyHandleFailed(string(slot.Position), err)
+			}
 			continue
 		}
 
 		pubKey, err := handle.Public(ctx)
 		if err != nil {
-			r.logger.Warn().Err(err).Str("slot", string(slot.Position)).Msg("failed to get public key")
+			if r.observer != nil {
+				r.observer.PublicKeyFailed(string(slot.Position), err)
+			}
 			continue
 		}
 
 		thumbprintStr, err := ComputeThumbprint(pubKey)
 		if err != nil {
-			r.logger.Warn().Err(err).Str("slot", string(slot.Position)).Msg("failed to compute thumbprint")
+			if r.observer != nil {
+				r.observer.ThumbprintFailed(string(slot.Position), err)
+			}
 			continue
 		}
 		thumbprint := KeyID(thumbprintStr)
@@ -534,7 +548,9 @@ func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context) error
 
 		_, algStr, err := handle.Metadata(ctx)
 		if err != nil {
-			r.logger.Warn().Err(err).Str("slot", string(slot.Position)).Msg("failed to get key metadata")
+			if r.observer != nil {
+				r.observer.MetadataFailed(string(slot.Position), err)
+			}
 			continue
 		}
 		alg := Algorithm(algStr)

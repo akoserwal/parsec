@@ -28,9 +28,9 @@ func NewObserverWithLogger(cfg *ObservabilityConfig, logger zerolog.Logger) (ser
 	switch cfg.Type {
 	case "logging":
 		return probe.NewLoggingObserverWithConfig(probe.LoggingObserverConfig{
-			TokenIssuanceLogger: eventLogger(logger, "token_issuance", cfg.TokenIssuance),
-			TokenExchangeLogger: eventLogger(logger, "token_exchange", cfg.TokenExchange),
-			AuthzCheckLogger:    eventLogger(logger, "authz_check", cfg.AuthzCheck),
+			TokenIssuanceLogger: EventLogger(logger, "token_issuance", cfg.TokenIssuance),
+			TokenExchangeLogger: EventLogger(logger, "token_exchange", cfg.TokenExchange),
+			AuthzCheckLogger:    EventLogger(logger, "authz_check", cfg.AuthzCheck),
 		}), nil
 	case "noop", "":
 		return &service.NoOpApplicationObserver{}, nil
@@ -70,11 +70,11 @@ func newCompositeObserver(cfg *ObservabilityConfig) (service.ApplicationObserver
 	return service.NewCompositeObserver(observers...), nil
 }
 
-// eventLogger creates a pre-configured sub-logger for a specific event type.
+// EventLogger creates a pre-configured sub-logger for a specific event type.
 // The returned logger has the "event" field baked in, its writer set according
 // to any per-event log_format override, and its level set according to the
 // per-event config. If eventCfg is nil the logger inherits the base settings.
-func eventLogger(base zerolog.Logger, eventName string, eventCfg *EventLoggingConfig) zerolog.Logger {
+func EventLogger(base zerolog.Logger, eventName string, eventCfg *EventLoggingConfig) zerolog.Logger {
 	logger := base.With().Str("event", eventName).Logger()
 	if eventCfg == nil {
 		return logger

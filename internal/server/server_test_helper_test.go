@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -134,7 +133,7 @@ func stubServerConfig() Config {
 	return Config{
 		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: zerolog.Nop()}),
+		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry}),
 	}
 }
 

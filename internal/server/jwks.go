@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/service"
@@ -27,7 +25,7 @@ type JWKSServer struct {
 	issuerRegistry  service.Registry
 	clock           clock.Clock
 	refreshInterval time.Duration
-	logger          zerolog.Logger
+	observer        JWKSObserver
 
 	// Cached response
 	mu             sync.RWMutex
@@ -50,8 +48,8 @@ type JWKSServerConfig struct {
 	// Clock is used for time operations (defaults to system clock)
 	Clock clock.Clock
 
-	// Logger is the structured logger to use (required)
-	Logger zerolog.Logger
+	// Observer for JWKS cache events. Nil means no events are emitted.
+	Observer JWKSObserver
 }
 
 // NewJWKSServer creates a new JWKS server with caching
@@ -66,7 +64,7 @@ func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 		issuerRegistry:  cfg.IssuerRegistry,
 		clock:           cfg.Clock,
 		refreshInterval: cfg.RefreshInterval,
-		logger:          cfg.Logger,
+		observer:        cfg.Observer,
 	}
 }
 
@@ -74,14 +72,18 @@ func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 func (s *JWKSServer) Start(ctx context.Context) error {
 	// Populate cache immediately
 	if err := s.refreshCache(ctx); err != nil {
-		s.logger.Warn().Err(err).Msg("initial cache population failed, will retry")
+		if s.observer != nil {
+			s.observer.InitialCachePopulationFailed(err)
+		}
 	}
 
 	// Start background refresh
 	s.ticker = s.clock.Ticker(s.refreshInterval)
 	return s.ticker.Start(func(ctx context.Context) {
 		if err := s.refreshCache(ctx); err != nil {
-			s.logger.Warn().Err(err).Msg("background cache refresh failed")
+			if s.observer != nil {
+				s.observer.CacheRefreshFailed(err)
+			}
 		}
 	})
 }
@@ -157,7 +159,9 @@ func (s *JWKSServer) buildJWKSResponse(ctx context.Context) (*parsecv1.GetJWKSRe
 	for _, pk := range publicKeys {
 		jwk, err := convertToJSONWebKey(pk)
 		if err != nil {
-			// Skip keys that can't be converted
+			if s.observer != nil {
+				s.observer.KeyConversionFailed(pk.KeyID, err)
+			}
 			continue
 		}
 		allKeys = append(allKeys, jwk)

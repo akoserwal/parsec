@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/service"
 )
@@ -39,7 +37,6 @@ func TestJWKSServerCaching(t *testing.T) {
 			IssuerRegistry:  registry,
 			RefreshInterval: 1 * time.Minute,
 			Clock:           clk,
-			Logger:          zerolog.Nop(),
 		})
 
 		// Start should populate the cache
@@ -83,7 +80,6 @@ func TestJWKSServerCaching(t *testing.T) {
 
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: registry,
-			Logger:         zerolog.Nop(),
 		})
 
 		// First request should populate cache
@@ -121,7 +117,6 @@ func TestJWKSServerCaching(t *testing.T) {
 			IssuerRegistry:  registry,
 			RefreshInterval: 1 * time.Hour, // Long interval so it doesn't refresh during test
 			Clock:           clk,
-			Logger:          zerolog.Nop(),
 		})
 
 		// Start populates cache
@@ -171,7 +166,6 @@ func TestJWKSServerCaching(t *testing.T) {
 			IssuerRegistry:  registry,
 			RefreshInterval: 1 * time.Minute,
 			Clock:           clk,
-			Logger:          zerolog.Nop(),
 		})
 
 		// Start populates cache and begins background refresh
@@ -224,7 +218,6 @@ func TestJWKSServerCaching(t *testing.T) {
 			IssuerRegistry:  registry,
 			RefreshInterval: 1 * time.Minute,
 			Clock:           clk,
-			Logger:          zerolog.Nop(),
 		})
 
 		// Start populates cache with good data
@@ -270,7 +263,6 @@ func TestJWKSServerCaching(t *testing.T) {
 
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: registry,
-			Logger:         zerolog.Nop(),
 		})
 
 		// Start will fail to populate cache but shouldn't error

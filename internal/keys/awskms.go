@@ -13,7 +13,6 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/kms/types"
-	"github.com/rs/zerolog"
 )
 
 // AWSKMSKeyProvider is a KeyProvider backed by AWS KMS.
@@ -22,7 +21,7 @@ type AWSKMSKeyProvider struct {
 	keyType     KeyType
 	algorithm   string
 	aliasPrefix string
-	logger      zerolog.Logger
+	observer    KeyProviderObserver
 }
 
 // AWSKMSConfig configures the AWS KMS key provider
@@ -32,7 +31,7 @@ type AWSKMSConfig struct {
 	Region      string
 	AliasPrefix string
 	Client      *kms.Client
-	Logger      zerolog.Logger
+	Observer    KeyProviderObserver
 }
 
 // NewAWSKMSKeyProvider creates a new AWS KMS key provider
@@ -77,7 +76,7 @@ func NewAWSKMSKeyProvider(ctx context.Context, cfg AWSKMSConfig) (*AWSKMSKeyProv
 		keyType:     cfg.KeyType,
 		algorithm:   algorithm,
 		aliasPrefix: cfg.AliasPrefix,
-		logger:      cfg.Logger,
+		observer:    cfg.Observer,
 	}, nil
 }
 
@@ -141,8 +140,8 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 			KeyId:               aws.String(oldKeyID),
 			PendingWindowInDays: aws.Int32(7),
 		})
-		if err != nil {
-			m.logger.Warn().Err(err).Str("key_id", oldKeyID).Msg("failed to schedule old key for deletion")
+		if err != nil && m.observer != nil {
+			m.observer.OldKeyDeletionFailed(oldKeyID, err)
 		}
 	}
 
@@ -154,7 +153,7 @@ func (m *AWSKMSKeyProvider) getKeyIDFromAlias(ctx context.Context, aliasName str
 		KeyId: aws.String(aliasName),
 	})
 	if err != nil {
-		return "", nil // Assume not found if error
+		return "", err
 	}
 	return aws.ToString(resp.KeyMetadata.KeyId), nil
 }
