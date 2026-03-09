@@ -14,12 +14,18 @@ import (
 	"github.com/project-kessel/parsec/internal/service"
 )
 
+// IssuerRegistryConfig groups optional dependencies for NewIssuerRegistry.
+type IssuerRegistryConfig struct {
+	KeyRotationObserver keys.KeyRotationObserver
+	KeyProviderObserver keys.KeyProviderObserver
+}
+
 // NewIssuerRegistry creates an issuer registry from configuration
-func NewIssuerRegistry(cfg Config) (service.Registry, error) {
+func NewIssuerRegistry(cfg Config, opts IssuerRegistryConfig) (service.Registry, error) {
 	registry := service.NewSimpleRegistry()
 
 	// Build key provider registry from global config
-	providerRegistry, err := buildKeyProviderRegistry(cfg.KeyProviders)
+	providerRegistry, err := buildKeyProviderRegistry(cfg.KeyProviders, opts.KeyProviderObserver)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build key provider registry: %w", err)
 	}
@@ -28,7 +34,7 @@ func NewIssuerRegistry(cfg Config) (service.Registry, error) {
 	slotStore := keys.NewInMemoryKeySlotStore()
 
 	// Build signer registry from global config
-	signerRegistry, err := buildSignerRegistry(cfg.Signers, cfg.TrustDomain, providerRegistry, slotStore)
+	signerRegistry, err := buildSignerRegistry(cfg.Signers, cfg.TrustDomain, providerRegistry, slotStore, opts.KeyRotationObserver)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build signer registry: %w", err)
 	}
@@ -61,7 +67,7 @@ func NewIssuerRegistry(cfg Config) (service.Registry, error) {
 }
 
 // buildKeyProviderRegistry creates a map of KeyProvider instances from configuration
-func buildKeyProviderRegistry(configs []KeyProviderConfig) (map[string]keys.KeyProvider, error) {
+func buildKeyProviderRegistry(configs []KeyProviderConfig, providerObs keys.KeyProviderObserver) (map[string]keys.KeyProvider, error) {
 	registry := make(map[string]keys.KeyProvider)
 
 	for _, cfg := range configs {
@@ -111,6 +117,7 @@ func buildKeyProviderRegistry(configs []KeyProviderConfig) (map[string]keys.KeyP
 				Algorithm:   cfg.Algorithm,
 				Region:      cfg.Region,
 				AliasPrefix: cfg.AliasPrefix,
+				Observer:    providerObs,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("failed to create aws_kms key provider %s: %w", cfg.ID, err)
@@ -127,7 +134,7 @@ func buildKeyProviderRegistry(configs []KeyProviderConfig) (map[string]keys.KeyP
 }
 
 // buildSignerRegistry creates a SignerRegistry from configuration
-func buildSignerRegistry(configs []SignerConfig, trustDomain string, providerRegistry map[string]keys.KeyProvider, slotStore keys.KeySlotStore) (*keys.SignerRegistry, error) {
+func buildSignerRegistry(configs []SignerConfig, trustDomain string, providerRegistry map[string]keys.KeyProvider, slotStore keys.KeySlotStore, rotObs keys.KeyRotationObserver) (*keys.SignerRegistry, error) {
 	registry := keys.NewSignerRegistry()
 
 	for _, cfg := range configs {
@@ -211,6 +218,7 @@ func buildSignerRegistry(configs []SignerConfig, trustDomain string, providerReg
 				GracePeriod:         gracePeriod,
 				CheckInterval:       checkInterval,
 				PrepareTimeout:      prepareTimeout,
+				Observer:            rotObs,
 			})
 		default:
 			return nil, fmt.Errorf("unknown signer type for %s: %s (supported: dual_slot)", cfg.ID, cfg.Type)

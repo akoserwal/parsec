@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/project-kessel/parsec/internal/datasource"
 	"github.com/project-kessel/parsec/internal/httpfixture"
+	"github.com/project-kessel/parsec/internal/keys"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
@@ -24,6 +26,10 @@ type Provider struct {
 	httpFixtureProvider  httpfixture.FixtureProvider
 	httpFixtureBuilt     bool
 	observer             service.ApplicationObserver
+	keyRotationObserver  keys.KeyRotationObserver
+	keyProviderObserver  keys.KeyProviderObserver
+	trustObserver        trust.TrustValidationObserver
+	cacheObserver        datasource.DataSourceCacheObserver
 }
 
 // NewProvider creates a new provider from configuration
@@ -37,6 +43,25 @@ func NewProvider(config *Config) *Provider {
 // Must be called before TokenService() or any method that depends on the observer.
 func (p *Provider) SetObserver(observer service.ApplicationObserver) {
 	p.observer = observer
+}
+
+// SetKeyObservers sets the key rotation and key provider observers.
+// Must be called before IssuerRegistry().
+func (p *Provider) SetKeyObservers(rot keys.KeyRotationObserver, prov keys.KeyProviderObserver) {
+	p.keyRotationObserver = rot
+	p.keyProviderObserver = prov
+}
+
+// SetTrustObserver sets the trust validation observer.
+// Must be called before TrustStore().
+func (p *Provider) SetTrustObserver(obs trust.TrustValidationObserver) {
+	p.trustObserver = obs
+}
+
+// SetCacheObserver sets the data source cache observer.
+// Must be called before DataSourceRegistry().
+func (p *Provider) SetCacheObserver(obs datasource.DataSourceCacheObserver) {
+	p.cacheObserver = obs
 }
 
 // Observer returns the configured application observer.
@@ -64,7 +89,7 @@ func (p *Provider) TrustStore() (trust.Store, error) {
 	}
 
 	transport := p.HTTPTransport()
-	store, err := NewTrustStore(p.config.TrustStore, transport)
+	store, err := NewTrustStore(p.config.TrustStore, transport, p.trustObserver)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create trust store: %w", err)
 	}
@@ -80,7 +105,7 @@ func (p *Provider) DataSourceRegistry() (*service.DataSourceRegistry, error) {
 	}
 
 	transport := p.HTTPTransport()
-	registry, err := NewDataSourceRegistry(p.config.DataSources, transport)
+	registry, err := NewDataSourceRegistry(p.config.DataSources, transport, p.cacheObserver)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create data source registry: %w", err)
 	}
@@ -95,7 +120,10 @@ func (p *Provider) IssuerRegistry() (service.Registry, error) {
 		return p.issuerRegistry, nil
 	}
 
-	registry, err := NewIssuerRegistry(*p.config)
+	registry, err := NewIssuerRegistry(*p.config, IssuerRegistryConfig{
+		KeyRotationObserver: p.keyRotationObserver,
+		KeyProviderObserver: p.keyProviderObserver,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create issuer registry: %w", err)
 	}

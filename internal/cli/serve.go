@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/project-kessel/parsec/internal/config"
+	"github.com/project-kessel/parsec/internal/probe"
 	"github.com/project-kessel/parsec/internal/server"
 )
 
@@ -82,6 +83,27 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// 4. Create logger and observer — single instance shared across all components
 	logger := config.NewLogger(cfg.Observability)
+	var (
+		configReloadCfg    *config.EventLoggingConfig
+		dataSourceCacheCfg *config.EventLoggingConfig
+		keyRotationCfg     *config.EventLoggingConfig
+		keyProviderCfg     *config.EventLoggingConfig
+		trustValidationCfg *config.EventLoggingConfig
+		jwksCacheCfg       *config.EventLoggingConfig
+		serverLifecycleCfg *config.EventLoggingConfig
+	)
+	if cfg.Observability != nil {
+		configReloadCfg = cfg.Observability.ConfigReload
+		dataSourceCacheCfg = cfg.Observability.DataSourceCache
+		keyRotationCfg = cfg.Observability.KeyRotation
+		keyProviderCfg = cfg.Observability.KeyProvider
+		trustValidationCfg = cfg.Observability.TrustValidation
+		jwksCacheCfg = cfg.Observability.JWKSCache
+		serverLifecycleCfg = cfg.Observability.ServerLifecycle
+	}
+	loader.SetObserver(&probe.LoggingConfigReloadObserver{
+		Logger: config.EventLogger(logger, "config_reload", configReloadCfg),
+	})
 
 	observer, err := config.NewObserverWithLogger(cfg.Observability, logger)
 	if err != nil {
@@ -90,6 +112,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Inject into provider so TokenService and other internal components use the same observer
 	provider.SetObserver(observer)
+	provider.SetKeyObservers(
+		&probe.LoggingKeyRotationObserver{
+			Logger: config.EventLogger(logger, "key_rotation", keyRotationCfg),
+		},
+		&probe.LoggingKeyProviderObserver{
+			Logger: config.EventLogger(logger, "key_provider", keyProviderCfg),
+		},
+	)
+	provider.SetTrustObserver(&probe.LoggingTrustValidationObserver{
+		Logger: config.EventLogger(logger, "trust_validation", trustValidationCfg),
+	})
+	provider.SetCacheObserver(&probe.LoggingDataSourceCacheObserver{
+		Logger: config.EventLogger(logger, "datasource_cache", dataSourceCacheCfg),
+	})
 
 	// 5. Build components via provider
 	trustStore, err := provider.TrustStore()
@@ -122,7 +158,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, observer)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
 		IssuerRegistry: issuerRegistry,
-		Logger:         logger,
+		Observer: &probe.LoggingJWKSObserver{
+			Logger: config.EventLogger(logger, "jwks_cache", jwksCacheCfg),
+		},
 	})
 
 	// Start JWKS background refresh
@@ -151,7 +189,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		AuthzServer:    authzServer,
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
-		Logger:         logger,
+		Observer: &probe.LoggingServerLifecycleObserver{
+			Logger: config.EventLogger(logger, "server_lifecycle", serverLifecycleCfg),
+		},
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
