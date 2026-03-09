@@ -345,9 +345,16 @@ type ObservabilityConfig struct {
 	LogFormat string `koanf:"log_format" usage:"log format: json, text"`
 
 	// Event-specific logging configuration
-	TokenIssuance *EventLoggingConfig `koanf:"token_issuance"`
-	TokenExchange *EventLoggingConfig `koanf:"token_exchange"`
-	AuthzCheck    *EventLoggingConfig `koanf:"authz_check"`
+	TokenIssuance   *EventLoggingConfig `koanf:"token_issuance"`
+	TokenExchange   *EventLoggingConfig `koanf:"token_exchange"`
+	AuthzCheck      *EventLoggingConfig `koanf:"authz_check"`
+	ConfigReload    *EventLoggingConfig `koanf:"config_reload"`
+	DataSourceCache *EventLoggingConfig `koanf:"datasource_cache"`
+	KeyRotation     *EventLoggingConfig `koanf:"key_rotation"`
+	KeyProvider     *EventLoggingConfig `koanf:"key_provider"`
+	TrustValidation *EventLoggingConfig `koanf:"trust_validation"`
+	JWKSCache       *EventLoggingConfig `koanf:"jwks_cache"`
+	ServerLifecycle *EventLoggingConfig `koanf:"server_lifecycle"`
 
 	// Composite observer fields - allows multiple observers
 	Observers []ObservabilityConfig `koanf:"observers"`

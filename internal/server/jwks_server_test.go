@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	"github.com/project-kessel/parsec/internal/issuer"
 	"github.com/project-kessel/parsec/internal/keys"
 	"github.com/project-kessel/parsec/internal/service"
@@ -61,7 +59,7 @@ func TestJWKSEndpoint(t *testing.T) {
 	env := startTestServer(t, Config{
 		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: zerolog.Nop()}),
+		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry}),
 	})
 
 	t.Run("GET /v1/jwks.json", func(t *testing.T) {
@@ -143,7 +141,7 @@ func TestJWKSWithMultipleIssuers(t *testing.T) {
 	env := startTestServer(t, Config{
 		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: zerolog.Nop()}),
+		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry}),
 	})
 
 	resp, err := env.HTTPClient.Get(env.HTTPBaseURL + "/v1/jwks.json")
@@ -204,7 +202,7 @@ func TestJWKSWithUnsignedIssuer(t *testing.T) {
 	env := startTestServer(t, Config{
 		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: zerolog.Nop()}),
+		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry}),
 	})
 
 	resp, err := env.HTTPClient.Get(env.HTTPBaseURL + "/v1/jwks.json")

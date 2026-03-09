@@ -18,6 +18,7 @@ type InMemoryCachingDataSource struct {
 	source    service.DataSource
 	cacheable service.Cacheable
 	clock     clock.Clock
+	observer  DataSourceCacheObserver
 	mu        sync.RWMutex
 	entries   map[string]*cacheEntry
 }
@@ -35,6 +36,13 @@ type InMemoryCachingDataSourceOption func(*InMemoryCachingDataSource)
 func WithClock(clk clock.Clock) InMemoryCachingDataSourceOption {
 	return func(ds *InMemoryCachingDataSource) {
 		ds.clock = clk
+	}
+}
+
+// WithCacheObserver sets the observer for cache lifecycle events
+func WithCacheObserver(obs DataSourceCacheObserver) InMemoryCachingDataSourceOption {
+	return func(ds *InMemoryCachingDataSource) {
+		ds.observer = obs
 	}
 }
 
@@ -87,17 +95,30 @@ func (c *InMemoryCachingDataSource) Fetch(ctx context.Context, input *service.Da
 	if found {
 		// Check if entry has expired
 		if entry.expiresAt.IsZero() || c.clock.Now().Before(entry.expiresAt) {
+			if c.observer != nil {
+				c.observer.CacheHit(c.source.Name())
+			}
 			return entry.result, nil
 		}
 		// Entry expired, remove it
+		if c.observer != nil {
+			c.observer.CacheExpired(c.source.Name())
+		}
 		c.mu.Lock()
 		delete(c.entries, cacheKeyStr)
 		c.mu.Unlock()
 	}
 
+	if c.observer != nil {
+		c.observer.CacheMiss(c.source.Name())
+	}
+
 	// Cache miss - fetch from source using the original (full) input
 	result, err := c.source.Fetch(ctx, input)
 	if err != nil {
+		if c.observer != nil {
+			c.observer.FetchFailed(c.source.Name(), err)
+		}
 		return nil, err
 	}
 

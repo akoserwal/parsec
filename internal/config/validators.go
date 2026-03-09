@@ -10,12 +10,12 @@ import (
 )
 
 // NewTrustStore creates a trust store from configuration
-func NewTrustStore(cfg TrustStoreConfig, transport http.RoundTripper) (trust.Store, error) {
+func NewTrustStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs trust.TrustValidationObserver) (trust.Store, error) {
 	switch cfg.Type {
 	case "stub_store":
 		return newStubStore(cfg, transport)
 	case "filtered_store":
-		return newFilteredStore(cfg, transport)
+		return newFilteredStore(cfg, transport, trustObs)
 	default:
 		return nil, fmt.Errorf("unknown trust store type: %s (supported: stub_store, filtered_store)", cfg.Type)
 	}
@@ -38,7 +38,7 @@ func newStubStore(cfg TrustStoreConfig, transport http.RoundTripper) (trust.Stor
 }
 
 // newFilteredStore creates a filtered trust store with validator filtering
-func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper) (trust.Store, error) {
+func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs trust.TrustValidationObserver) (trust.Store, error) {
 	var opts []trust.FilteredStoreOption
 
 	// Add validator filter if configured
@@ -48,6 +48,10 @@ func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper) (trust.
 			return nil, fmt.Errorf("failed to create validator filter: %w", err)
 		}
 		opts = append(opts, trust.WithValidatorFilter(filter))
+	}
+
+	if trustObs != nil {
+		opts = append(opts, trust.WithTrustValidationObserver(trustObs))
 	}
 
 	store, err := trust.NewFilteredStore(opts...)

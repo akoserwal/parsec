@@ -7,8 +7,6 @@ import (
 	"crypto/rand"
 	"testing"
 
-	"github.com/rs/zerolog"
-
 	"github.com/project-kessel/parsec/internal/service"
 )
 
@@ -19,7 +17,6 @@ func TestJWKSServer(t *testing.T) {
 		emptyRegistry := service.NewSimpleRegistry()
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: emptyRegistry,
-			Logger:         zerolog.Nop(),
 		})
 
 		resp, err := jwksServer.GetJWKS(ctx, nil)
@@ -55,7 +52,6 @@ func TestJWKSServer(t *testing.T) {
 
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: registry,
-			Logger:         zerolog.Nop(),
 		})
 
 		resp, err := jwksServer.GetJWKS(ctx, nil)
@@ -123,7 +119,6 @@ func TestJWKSServer(t *testing.T) {
 
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: registry,
-			Logger:         zerolog.Nop(),
 		})
 
 		resp, err := jwksServer.GetJWKS(ctx, nil)
@@ -160,7 +155,6 @@ func TestJWKSServer(t *testing.T) {
 
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: registry,
-			Logger:         zerolog.Nop(),
 		})
 
 		resp, err := jwksServer.GetJWKS(ctx, nil)
@@ -195,7 +189,6 @@ func TestJWKSServer(t *testing.T) {
 
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: registry,
-			Logger:         zerolog.Nop(),
 		})
 
 		resp, err := jwksServer.GetJWKS(ctx, nil)
@@ -221,7 +214,6 @@ func TestJWKSServer(t *testing.T) {
 
 		jwksServer := NewJWKSServer(JWKSServerConfig{
 			IssuerRegistry: registry,
-			Logger:         zerolog.Nop(),
 		})
 
 		resp, err := jwksServer.GetJWKS(ctx, nil)
