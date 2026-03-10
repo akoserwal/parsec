@@ -82,7 +82,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	provider := config.NewProvider(cfg)
 
 	// 4. Create logger and observer — single instance shared across all components
-	logger := config.NewLogger(cfg.Observability)
+	logCtx := config.NewLoggerContext(cfg.Observability)
+	logger := logCtx.Logger
 	var (
 		configReloadCfg    *config.EventLoggingConfig
 		dataSourceCacheCfg *config.EventLoggingConfig
@@ -102,10 +103,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		serverLifecycleCfg = cfg.Observability.ServerLifecycle
 	}
 	loader.SetObserver(&probe.LoggingConfigReloadObserver{
-		Logger: config.EventLogger(logger, "config_reload", configReloadCfg),
+		Logger: config.EventLogger(logCtx, "config_reload", configReloadCfg),
 	})
 
-	observer, err := config.NewObserverWithLogger(cfg.Observability, logger)
+	observer, err := config.NewObserverWithLogger(cfg.Observability, logCtx)
 	if err != nil {
 		return fmt.Errorf("failed to create observer: %w", err)
 	}
@@ -114,17 +115,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 	provider.SetObserver(observer)
 	provider.SetKeyObservers(
 		&probe.LoggingKeyRotationObserver{
-			Logger: config.EventLogger(logger, "key_rotation", keyRotationCfg),
+			Logger: config.EventLogger(logCtx, "key_rotation", keyRotationCfg),
 		},
 		&probe.LoggingKeyProviderObserver{
-			Logger: config.EventLogger(logger, "key_provider", keyProviderCfg),
+			Logger: config.EventLogger(logCtx, "key_provider", keyProviderCfg),
 		},
 	)
 	provider.SetTrustObserver(&probe.LoggingTrustValidationObserver{
-		Logger: config.EventLogger(logger, "trust_validation", trustValidationCfg),
+		Logger: config.EventLogger(logCtx, "trust_validation", trustValidationCfg),
 	})
 	provider.SetCacheObserver(&probe.LoggingDataSourceCacheObserver{
-		Logger: config.EventLogger(logger, "datasource_cache", dataSourceCacheCfg),
+		Logger: config.EventLogger(logCtx, "datasource_cache", dataSourceCacheCfg),
 	})
 
 	// 5. Build components via provider
@@ -159,7 +160,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
 		IssuerRegistry: issuerRegistry,
 		Observer: &probe.LoggingJWKSObserver{
-			Logger: config.EventLogger(logger, "jwks_cache", jwksCacheCfg),
+			Logger: config.EventLogger(logCtx, "jwks_cache", jwksCacheCfg),
 		},
 	})
 
@@ -190,7 +191,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
 		Observer: &probe.LoggingServerLifecycleObserver{
-			Logger: config.EventLogger(logger, "server_lifecycle", serverLifecycleCfg),
+			Logger: config.EventLogger(logCtx, "server_lifecycle", serverLifecycleCfg),
 		},
 	})
 	if err := srv.Start(ctx); err != nil {
