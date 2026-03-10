@@ -12,15 +12,22 @@ import (
 	"github.com/project-kessel/parsec/internal/service"
 )
 
+// LoggerContext couples a zerolog logger with its destination writer so
+// per-event formatting overrides can preserve the original sink.
+type LoggerContext struct {
+	Logger zerolog.Logger
+	Writer io.Writer
+}
+
 // NewObserver creates an application observer from configuration.
 // This is a convenience wrapper that creates its own logger from cfg.
 func NewObserver(cfg *ObservabilityConfig) (service.ApplicationObserver, error) {
-	return NewObserverWithLogger(cfg, NewLogger(cfg))
+	return NewObserverWithLogger(cfg, NewLoggerContext(cfg))
 }
 
 // NewObserverWithLogger creates an application observer using the provided logger.
 // Use this when you want the observer to share a logger with other components.
-func NewObserverWithLogger(cfg *ObservabilityConfig, logger zerolog.Logger) (service.ApplicationObserver, error) {
+func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (service.ApplicationObserver, error) {
 	if cfg == nil {
 		return &service.NoOpApplicationObserver{}, nil
 	}
@@ -28,9 +35,9 @@ func NewObserverWithLogger(cfg *ObservabilityConfig, logger zerolog.Logger) (ser
 	switch cfg.Type {
 	case "logging":
 		return probe.NewLoggingObserverWithConfig(probe.LoggingObserverConfig{
-			TokenIssuanceLogger: EventLogger(logger, "token_issuance", cfg.TokenIssuance),
-			TokenExchangeLogger: EventLogger(logger, "token_exchange", cfg.TokenExchange),
-			AuthzCheckLogger:    EventLogger(logger, "authz_check", cfg.AuthzCheck),
+			TokenIssuanceLogger: EventLogger(logCtx, "token_issuance", cfg.TokenIssuance),
+			TokenExchangeLogger: EventLogger(logCtx, "token_exchange", cfg.TokenExchange),
+			AuthzCheckLogger:    EventLogger(logCtx, "authz_check", cfg.AuthzCheck),
 		}), nil
 	case "noop", "":
 		return &service.NoOpApplicationObserver{}, nil
@@ -43,13 +50,33 @@ func NewObserverWithLogger(cfg *ObservabilityConfig, logger zerolog.Logger) (ser
 
 // NewLogger creates a structured zerolog logger from the observability configuration.
 func NewLogger(cfg *ObservabilityConfig) zerolog.Logger {
+	return NewLoggerContext(cfg).Logger
+}
+
+// NewLoggerContext creates a structured zerolog logger and the writer used as
+// its sink.
+func NewLoggerContext(cfg *ObservabilityConfig) LoggerContext {
 	if cfg == nil {
-		return zerolog.New(os.Stdout).With().Timestamp().Logger()
+		return LoggerContext{
+			Logger: zerolog.New(os.Stdout).With().Timestamp().Logger(),
+			Writer: os.Stdout,
+		}
 	}
 
 	defaultLevel := parseLogLevel(cfg.LogLevel)
-	writer := createWriter(cfg.LogFormat)
-	return zerolog.New(writer).With().Timestamp().Logger().Level(defaultLevel)
+	writer := createWriter(cfg.LogFormat, os.Stdout)
+	return LoggerContext{
+		Logger: zerolog.New(writer).With().Timestamp().Logger().Level(defaultLevel),
+		Writer: writer,
+	}
+}
+
+// NewLoggerWithWriter creates a structured zerolog logger and returns the writer
+// used as its sink. Callers can pass that writer to EventLogger so per-event
+// log_format overrides change formatting without changing destination.
+func NewLoggerWithWriter(cfg *ObservabilityConfig) (zerolog.Logger, io.Writer) {
+	logCtx := NewLoggerContext(cfg)
+	return logCtx.Logger, logCtx.Writer
 }
 
 // newCompositeObserver creates a composite observer that delegates to multiple observers
@@ -74,13 +101,13 @@ func newCompositeObserver(cfg *ObservabilityConfig) (service.ApplicationObserver
 // The returned logger has the "event" field baked in, its writer set according
 // to any per-event log_format override, and its level set according to the
 // per-event config. If eventCfg is nil the logger inherits the base settings.
-func EventLogger(base zerolog.Logger, eventName string, eventCfg *EventLoggingConfig) zerolog.Logger {
-	logger := base.With().Str("event", eventName).Logger()
+func EventLogger(logCtx LoggerContext, eventName string, eventCfg *EventLoggingConfig) zerolog.Logger {
+	logger := logCtx.Logger.With().Str("event", eventName).Logger()
 	if eventCfg == nil {
 		return logger
 	}
 	if eventCfg.LogFormat != "" {
-		logger = logger.Output(createWriter(eventCfg.LogFormat))
+		logger = logger.Output(createWriter(eventCfg.LogFormat, logCtx.Writer))
 	}
 	if eventCfg.Enabled != nil && !*eventCfg.Enabled {
 		return logger.Level(zerolog.Disabled)
@@ -92,14 +119,18 @@ func EventLogger(base zerolog.Logger, eventName string, eventCfg *EventLoggingCo
 }
 
 // createWriter creates a zerolog writer based on the format string.
-func createWriter(format string) io.Writer {
+// It preserves destination by using fallback as the sink.
+func createWriter(format string, fallback io.Writer) io.Writer {
+	if fallback == nil {
+		fallback = os.Stdout
+	}
 	switch strings.ToLower(format) {
 	case "text":
-		return zerolog.ConsoleWriter{Out: os.Stdout}
+		return zerolog.ConsoleWriter{Out: fallback}
 	case "json", "":
-		return os.Stdout
+		return fallback
 	default:
-		return os.Stdout
+		return fallback
 	}
 }
 
