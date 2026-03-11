@@ -13,6 +13,8 @@ import (
 	"github.com/project-kessel/parsec/internal/config"
 	"github.com/project-kessel/parsec/internal/probe"
 	"github.com/project-kessel/parsec/internal/server"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 type infraEventConfigs struct {
@@ -23,6 +25,24 @@ type infraEventConfigs struct {
 	trustValidation *config.EventLoggingConfig
 	jwksCache       *config.EventLoggingConfig
 	serverLifecycle *config.EventLoggingConfig
+}
+
+type wiredInfraObservers struct {
+	configReload    *probe.LoggingConfigReloadObserver
+	keyRotation     *probe.LoggingKeyRotationObserver
+	keyProvider     *probe.LoggingKeyProviderObserver
+	trustValidation *probe.LoggingTrustValidationObserver
+	dataSourceCache *probe.LoggingDataSourceCacheObserver
+	jwksCache       *probe.LoggingJWKSObserver
+	serverLifecycle *probe.LoggingServerLifecycleObserver
+}
+
+type runtimeComponents struct {
+	trustStore           trust.Store
+	tokenService         *service.TokenService
+	authzTokenTypes      []server.TokenTypeSpec
+	claimsFilterRegistry server.ClaimsFilterRegistry
+	issuerRegistry       service.Registry
 }
 
 func buildInfraEventConfigs(obs *config.ObservabilityConfig) infraEventConfigs {
@@ -38,6 +58,67 @@ func buildInfraEventConfigs(obs *config.ObservabilityConfig) infraEventConfigs {
 		jwksCache:       obs.JWKSCache,
 		serverLifecycle: obs.ServerLifecycle,
 	}
+}
+
+func wireInfraObservers(logCtx config.LoggerContext, infraCfg infraEventConfigs) wiredInfraObservers {
+	return wiredInfraObservers{
+		configReload: &probe.LoggingConfigReloadObserver{
+			Logger: config.EventLogger(logCtx, "config_reload", infraCfg.configReload),
+		},
+		keyRotation: &probe.LoggingKeyRotationObserver{
+			Logger: config.EventLogger(logCtx, "key_rotation", infraCfg.keyRotation),
+		},
+		keyProvider: &probe.LoggingKeyProviderObserver{
+			Logger: config.EventLogger(logCtx, "key_provider", infraCfg.keyProvider),
+		},
+		trustValidation: &probe.LoggingTrustValidationObserver{
+			Logger: config.EventLogger(logCtx, "trust_validation", infraCfg.trustValidation),
+		},
+		dataSourceCache: &probe.LoggingDataSourceCacheObserver{
+			Logger: config.EventLogger(logCtx, "datasource_cache", infraCfg.dataSourceCache),
+		},
+		jwksCache: &probe.LoggingJWKSObserver{
+			Logger: config.EventLogger(logCtx, "jwks_cache", infraCfg.jwksCache),
+		},
+		serverLifecycle: &probe.LoggingServerLifecycleObserver{
+			Logger: config.EventLogger(logCtx, "server_lifecycle", infraCfg.serverLifecycle),
+		},
+	}
+}
+
+func buildRuntimeComponents(provider *config.Provider) (*runtimeComponents, error) {
+	trustStore, err := provider.TrustStore()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create trust store: %w", err)
+	}
+
+	tokenService, err := provider.TokenService()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create token service: %w", err)
+	}
+
+	authzTokenTypes, err := provider.AuthzServerTokenTypes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get authz token types: %w", err)
+	}
+
+	claimsFilterRegistry, err := provider.ExchangeServerClaimsFilterRegistry()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get exchange server claims filter registry: %w", err)
+	}
+
+	issuerRegistry, err := provider.IssuerRegistry()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get issuer registry: %w", err)
+	}
+
+	return &runtimeComponents{
+		trustStore:           trustStore,
+		tokenService:         tokenService,
+		authzTokenTypes:      authzTokenTypes,
+		claimsFilterRegistry: claimsFilterRegistry,
+		issuerRegistry:       issuerRegistry,
+	}, nil
 }
 
 // NewServeCmd creates the serve command
@@ -110,9 +191,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	logCtx := config.NewLoggerContext(cfg.Observability)
 	logger := logCtx.Logger
 	infraCfg := buildInfraEventConfigs(cfg.Observability)
-	loader.SetObserver(&probe.LoggingConfigReloadObserver{
-		Logger: config.EventLogger(logCtx, "config_reload", infraCfg.configReload),
-	})
+	infraObservers := wireInfraObservers(logCtx, infraCfg)
+	loader.SetObserver(infraObservers.configReload)
 
 	observer, err := config.NewObserverWithLogger(cfg.Observability, logCtx)
 	if err != nil {
@@ -122,54 +202,24 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Inject into provider so TokenService and other internal components use the same observer
 	provider.SetObserver(observer)
 	provider.SetKeyObservers(
-		&probe.LoggingKeyRotationObserver{
-			Logger: config.EventLogger(logCtx, "key_rotation", infraCfg.keyRotation),
-		},
-		&probe.LoggingKeyProviderObserver{
-			Logger: config.EventLogger(logCtx, "key_provider", infraCfg.keyProvider),
-		},
+		infraObservers.keyRotation,
+		infraObservers.keyProvider,
 	)
-	provider.SetTrustObserver(&probe.LoggingTrustValidationObserver{
-		Logger: config.EventLogger(logCtx, "trust_validation", infraCfg.trustValidation),
-	})
-	provider.SetCacheObserver(&probe.LoggingDataSourceCacheObserver{
-		Logger: config.EventLogger(logCtx, "datasource_cache", infraCfg.dataSourceCache),
-	})
+	provider.SetTrustObserver(infraObservers.trustValidation)
+	provider.SetCacheObserver(infraObservers.dataSourceCache)
 
 	// 5. Build components via provider
-	trustStore, err := provider.TrustStore()
+	components, err := buildRuntimeComponents(provider)
 	if err != nil {
-		return fmt.Errorf("failed to create trust store: %w", err)
-	}
-
-	tokenService, err := provider.TokenService()
-	if err != nil {
-		return fmt.Errorf("failed to create token service: %w", err)
-	}
-
-	authzTokenTypes, err := provider.AuthzServerTokenTypes()
-	if err != nil {
-		return fmt.Errorf("failed to get authz token types: %w", err)
-	}
-
-	claimsFilterRegistry, err := provider.ExchangeServerClaimsFilterRegistry()
-	if err != nil {
-		return fmt.Errorf("failed to get exchange server claims filter registry: %w", err)
-	}
-
-	issuerRegistry, err := provider.IssuerRegistry()
-	if err != nil {
-		return fmt.Errorf("failed to get issuer registry: %w", err)
+		return err
 	}
 
 	// 6. Create service handlers with observability
-	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, observer)
-	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, observer)
+	authzServer := server.NewAuthzServer(components.trustStore, components.tokenService, components.authzTokenTypes, observer)
+	exchangeServer := server.NewExchangeServer(components.trustStore, components.tokenService, components.claimsFilterRegistry, observer)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
-		IssuerRegistry: issuerRegistry,
-		Observer: &probe.LoggingJWKSObserver{
-			Logger: config.EventLogger(logCtx, "jwks_cache", infraCfg.jwksCache),
-		},
+		IssuerRegistry: components.issuerRegistry,
+		Observer:       infraObservers.jwksCache,
 	})
 
 	// Start JWKS background refresh
@@ -198,9 +248,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		AuthzServer:    authzServer,
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
-		Observer: &probe.LoggingServerLifecycleObserver{
-			Logger: config.EventLogger(logCtx, "server_lifecycle", infraCfg.serverLifecycle),
-		},
+		Observer:       infraObservers.serverLifecycle,
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
