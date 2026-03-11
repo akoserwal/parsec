@@ -42,7 +42,7 @@ func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (serv
 	case "noop", "":
 		return &service.NoOpApplicationObserver{}, nil
 	case "composite":
-		return newCompositeObserver(cfg)
+		return newCompositeObserver(cfg, logCtx)
 	default:
 		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, composite)", cfg.Type)
 	}
@@ -72,14 +72,14 @@ func NewLoggerContext(cfg *ObservabilityConfig) LoggerContext {
 }
 
 // newCompositeObserver creates a composite observer that delegates to multiple observers
-func newCompositeObserver(cfg *ObservabilityConfig) (service.ApplicationObserver, error) {
+func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (service.ApplicationObserver, error) {
 	if len(cfg.Observers) == 0 {
 		return nil, fmt.Errorf("composite observer requires at least one sub-observer")
 	}
 
 	var observers []service.ApplicationObserver
 	for i, subCfg := range cfg.Observers {
-		observer, err := NewObserver(&subCfg)
+		observer, err := NewObserverWithLogger(&subCfg, logCtx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create observer %d: %w", i, err)
 		}
