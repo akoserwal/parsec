@@ -71,14 +71,6 @@ func NewLoggerContext(cfg *ObservabilityConfig) LoggerContext {
 	}
 }
 
-// NewLoggerWithWriter creates a structured zerolog logger and returns the writer
-// used as its sink. Callers can pass that writer to EventLogger so per-event
-// log_format overrides change formatting without changing destination.
-func NewLoggerWithWriter(cfg *ObservabilityConfig) (zerolog.Logger, io.Writer) {
-	logCtx := NewLoggerContext(cfg)
-	return logCtx.Logger, logCtx.Writer
-}
-
 // newCompositeObserver creates a composite observer that delegates to multiple observers
 func newCompositeObserver(cfg *ObservabilityConfig) (service.ApplicationObserver, error) {
 	if len(cfg.Observers) == 0 {
