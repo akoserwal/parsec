@@ -29,18 +29,14 @@ func NewObserver(cfg *ObservabilityConfig) (service.ApplicationObserver, error) 
 // Use this when you want the observer to share a logger with other components.
 func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (service.ApplicationObserver, error) {
 	if cfg == nil {
-		return &service.NoOpApplicationObserver{}, nil
+		return newNoopObserver(), nil
 	}
 
 	switch cfg.Type {
 	case "logging":
-		return probe.NewLoggingObserverWithConfig(probe.LoggingObserverConfig{
-			TokenIssuanceLogger: EventLogger(logCtx, "token_issuance", cfg.TokenIssuance),
-			TokenExchangeLogger: EventLogger(logCtx, "token_exchange", cfg.TokenExchange),
-			AuthzCheckLogger:    EventLogger(logCtx, "authz_check", cfg.AuthzCheck),
-		}), nil
+		return newLoggingObserver(cfg, logCtx), nil
 	case "noop", "":
-		return &service.NoOpApplicationObserver{}, nil
+		return newNoopObserver(), nil
 	case "composite":
 		return newCompositeObserver(cfg, logCtx)
 	default:
@@ -53,8 +49,21 @@ func NewLogger(cfg *ObservabilityConfig) zerolog.Logger {
 	return NewLoggerContext(cfg).Logger
 }
 
+func newLoggingObserver(cfg *ObservabilityConfig, logCtx LoggerContext) service.ApplicationObserver {
+	return probe.NewLoggingObserverWithConfig(probe.LoggingObserverConfig{
+		TokenIssuanceLogger: EventLogger(logCtx, "token_issuance", cfg.TokenIssuance),
+		TokenExchangeLogger: EventLogger(logCtx, "token_exchange", cfg.TokenExchange),
+		AuthzCheckLogger:    EventLogger(logCtx, "authz_check", cfg.AuthzCheck),
+	})
+}
+
+func newNoopObserver() service.ApplicationObserver {
+	return &service.NoOpApplicationObserver{}
+}
+
 // NewLoggerContext creates a structured zerolog logger and the writer used as
-// its sink.
+// its sink. Writer holds the raw destination (e.g. os.Stdout), never a
+// format wrapper, so EventLogger can re-wrap it with a different format.
 func NewLoggerContext(cfg *ObservabilityConfig) LoggerContext {
 	if cfg == nil {
 		return LoggerContext{
@@ -63,11 +72,12 @@ func NewLoggerContext(cfg *ObservabilityConfig) LoggerContext {
 		}
 	}
 
+	rawSink := os.Stdout
 	defaultLevel := parseLogLevel(cfg.LogLevel)
-	writer := createWriter(cfg.LogFormat, os.Stdout)
+	writer := createWriter(cfg.LogFormat, rawSink)
 	return LoggerContext{
 		Logger: zerolog.New(writer).With().Timestamp().Logger().Level(defaultLevel),
-		Writer: writer,
+		Writer: rawSink,
 	}
 }
 

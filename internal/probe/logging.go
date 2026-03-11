@@ -48,14 +48,14 @@ func NewLoggingObserverWithConfig(cfg LoggingObserverConfig) service.Application
 	}
 }
 
-func (o *loggingObserver) TokenIssuanceStarted(
-	ctx context.Context,
+func tokenIssuanceRequestLogger(
+	base zerolog.Logger,
 	subject *trust.Result,
 	actor *trust.Result,
 	scope string,
 	tokenTypes []service.TokenType,
-) (context.Context, service.TokenIssuanceProbe) {
-	loggerCtx := o.tokenIssuanceLogger.With().
+) zerolog.Logger {
+	loggerCtx := base.With().
 		Str("scope", scope).
 		Interface("token_types", tokenTypes)
 
@@ -71,7 +71,32 @@ func (o *loggingObserver) TokenIssuanceStarted(
 			Str("actor_trust_domain", actor.TrustDomain)
 	}
 
-	requestLogger := loggerCtx.Logger()
+	return loggerCtx.Logger()
+}
+
+func tokenExchangeRequestLogger(
+	base zerolog.Logger,
+	grantType string,
+	requestedTokenType string,
+	audience string,
+	scope string,
+) zerolog.Logger {
+	return base.With().
+		Str("grant_type", grantType).
+		Str("requested_token_type", requestedTokenType).
+		Str("audience", audience).
+		Str("scope", scope).
+		Logger()
+}
+
+func (o *loggingObserver) TokenIssuanceStarted(
+	ctx context.Context,
+	subject *trust.Result,
+	actor *trust.Result,
+	scope string,
+	tokenTypes []service.TokenType,
+) (context.Context, service.TokenIssuanceProbe) {
+	requestLogger := tokenIssuanceRequestLogger(o.tokenIssuanceLogger, subject, actor, scope, tokenTypes)
 	requestLogger.Debug().Msg("Starting token issuance")
 
 	return ctx, &loggingTokenIssuanceProbe{
@@ -130,13 +155,7 @@ func (o *loggingObserver) TokenExchangeStarted(
 	audience string,
 	scope string,
 ) (context.Context, service.TokenExchangeProbe) {
-	requestLogger := o.tokenExchangeLogger.With().
-		Str("grant_type", grantType).
-		Str("requested_token_type", requestedTokenType).
-		Str("audience", audience).
-		Str("scope", scope).
-		Logger()
-
+	requestLogger := tokenExchangeRequestLogger(o.tokenExchangeLogger, grantType, requestedTokenType, audience, scope)
 	requestLogger.Debug().Msg("Starting token exchange")
 
 	return ctx, &loggingTokenExchangeProbe{
@@ -200,7 +219,9 @@ func (p *loggingTokenExchangeProbe) End() {
 func (o *loggingObserver) AuthzCheckStarted(
 	ctx context.Context,
 ) (context.Context, service.AuthzCheckProbe) {
-	requestLogger := o.authzCheckLogger.With().Logger()
+	// AuthzCheckStarted receives no request-scoped parameters (unlike
+	// token issuance/exchange), so we use the base event logger directly.
+	requestLogger := o.authzCheckLogger
 	requestLogger.Debug().Msg("Starting authorization check")
 
 	return ctx, &loggingAuthzCheckProbe{
