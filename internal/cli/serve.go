@@ -15,6 +15,31 @@ import (
 	"github.com/project-kessel/parsec/internal/server"
 )
 
+type infraEventConfigs struct {
+	configReload    *config.EventLoggingConfig
+	dataSourceCache *config.EventLoggingConfig
+	keyRotation     *config.EventLoggingConfig
+	keyProvider     *config.EventLoggingConfig
+	trustValidation *config.EventLoggingConfig
+	jwksCache       *config.EventLoggingConfig
+	serverLifecycle *config.EventLoggingConfig
+}
+
+func buildInfraEventConfigs(obs *config.ObservabilityConfig) infraEventConfigs {
+	if obs == nil {
+		return infraEventConfigs{}
+	}
+	return infraEventConfigs{
+		configReload:    obs.ConfigReload,
+		dataSourceCache: obs.DataSourceCache,
+		keyRotation:     obs.KeyRotation,
+		keyProvider:     obs.KeyProvider,
+		trustValidation: obs.TrustValidation,
+		jwksCache:       obs.JWKSCache,
+		serverLifecycle: obs.ServerLifecycle,
+	}
+}
+
 // NewServeCmd creates the serve command
 func NewServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -84,26 +109,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 4. Create logger and observer — single instance shared across all components
 	logCtx := config.NewLoggerContext(cfg.Observability)
 	logger := logCtx.Logger
-	var (
-		configReloadCfg    *config.EventLoggingConfig
-		dataSourceCacheCfg *config.EventLoggingConfig
-		keyRotationCfg     *config.EventLoggingConfig
-		keyProviderCfg     *config.EventLoggingConfig
-		trustValidationCfg *config.EventLoggingConfig
-		jwksCacheCfg       *config.EventLoggingConfig
-		serverLifecycleCfg *config.EventLoggingConfig
-	)
-	if cfg.Observability != nil {
-		configReloadCfg = cfg.Observability.ConfigReload
-		dataSourceCacheCfg = cfg.Observability.DataSourceCache
-		keyRotationCfg = cfg.Observability.KeyRotation
-		keyProviderCfg = cfg.Observability.KeyProvider
-		trustValidationCfg = cfg.Observability.TrustValidation
-		jwksCacheCfg = cfg.Observability.JWKSCache
-		serverLifecycleCfg = cfg.Observability.ServerLifecycle
-	}
+	infraCfg := buildInfraEventConfigs(cfg.Observability)
 	loader.SetObserver(&probe.LoggingConfigReloadObserver{
-		Logger: config.EventLogger(logCtx, "config_reload", configReloadCfg),
+		Logger: config.EventLogger(logCtx, "config_reload", infraCfg.configReload),
 	})
 
 	observer, err := config.NewObserverWithLogger(cfg.Observability, logCtx)
@@ -115,17 +123,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 	provider.SetObserver(observer)
 	provider.SetKeyObservers(
 		&probe.LoggingKeyRotationObserver{
-			Logger: config.EventLogger(logCtx, "key_rotation", keyRotationCfg),
+			Logger: config.EventLogger(logCtx, "key_rotation", infraCfg.keyRotation),
 		},
 		&probe.LoggingKeyProviderObserver{
-			Logger: config.EventLogger(logCtx, "key_provider", keyProviderCfg),
+			Logger: config.EventLogger(logCtx, "key_provider", infraCfg.keyProvider),
 		},
 	)
 	provider.SetTrustObserver(&probe.LoggingTrustValidationObserver{
-		Logger: config.EventLogger(logCtx, "trust_validation", trustValidationCfg),
+		Logger: config.EventLogger(logCtx, "trust_validation", infraCfg.trustValidation),
 	})
 	provider.SetCacheObserver(&probe.LoggingDataSourceCacheObserver{
-		Logger: config.EventLogger(logCtx, "datasource_cache", dataSourceCacheCfg),
+		Logger: config.EventLogger(logCtx, "datasource_cache", infraCfg.dataSourceCache),
 	})
 
 	// 5. Build components via provider
@@ -160,7 +168,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
 		IssuerRegistry: issuerRegistry,
 		Observer: &probe.LoggingJWKSObserver{
-			Logger: config.EventLogger(logCtx, "jwks_cache", jwksCacheCfg),
+			Logger: config.EventLogger(logCtx, "jwks_cache", infraCfg.jwksCache),
 		},
 	})
 
@@ -191,7 +199,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
 		Observer: &probe.LoggingServerLifecycleObserver{
-			Logger: config.EventLogger(logCtx, "server_lifecycle", serverLifecycleCfg),
+			Logger: config.EventLogger(logCtx, "server_lifecycle", infraCfg.serverLifecycle),
 		},
 	})
 	if err := srv.Start(ctx); err != nil {
