@@ -65,11 +65,11 @@ type Config struct {
 	ExchangeServer *ExchangeServer
 	JWKSServer     *JWKSServer
 
-	// Observer for server lifecycle events. Nil means no events are emitted.
+	// Observer must be non-nil; use NoopObserver{} in tests.
 	Observer ServerLifecycleObserver
 }
 
-// New creates a new server with the given configuration
+// New creates a new server with the given configuration.
 func New(cfg Config) *Server {
 	return &Server{
 		grpcListener:    cfg.GRPCListener,
@@ -149,16 +149,12 @@ func (s *Server) Start(ctx context.Context) error {
 	// that an early-return error never orphans a running goroutine.
 	go func() {
 		if err := s.grpcServer.Serve(s.grpcListener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-			if s.observer != nil {
-				s.observer.GRPCServeFailed(err)
-			}
+			s.observer.GRPCServeFailed(err)
 		}
 	}()
 	go func() {
 		if err := s.httpServer.Serve(s.httpListener); err != nil && err != http.ErrServerClosed {
-			if s.observer != nil {
-				s.observer.HTTPServeFailed(err)
-			}
+			s.observer.HTTPServeFailed(err)
 		}
 	}()
 

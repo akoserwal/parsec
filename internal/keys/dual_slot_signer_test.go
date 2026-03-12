@@ -68,17 +68,17 @@ func newTestDualSlotRotatingSigner(t *testing.T, clk clock.Clock, slotStore KeyS
 
 	// Create rotating signer with short timings for testing
 	rs := NewDualSlotRotatingSigner(DualSlotRotatingSignerConfig{
-		Namespace:           testTokenType, // Test namespace
+		Namespace:           testTokenType,
 		KeyProviderID:       "test-provider",
 		KeyProviderRegistry: kpRegistry,
 		SlotStore:           slotStore,
 		Clock:               clk,
-		// Short timings for faster tests
-		KeyTTL:            30 * time.Minute, // Longer to avoid premature expiration
-		RotationThreshold: 8 * time.Minute,  // Rotate when 8m remaining
-		GracePeriod:       2 * time.Minute,
-		CheckInterval:     10 * time.Second,
-		PrepareTimeout:    1 * time.Minute,
+		KeyTTL:              30 * time.Minute,
+		RotationThreshold:   8 * time.Minute,
+		GracePeriod:         2 * time.Minute,
+		CheckInterval:       10 * time.Second,
+		PrepareTimeout:      1 * time.Minute,
+		Observer:            NoopObserver{},
 	})
 
 	return rs, keyProvider
@@ -631,6 +631,7 @@ func TestDualSlotRotatingSigner_Namespacing(t *testing.T) {
 		SlotStore:           slotStore,
 		Clock:               clk,
 		PrepareTimeout:      1 * time.Minute,
+		Observer:            NoopObserver{},
 	})
 
 	ctx := context.Background()

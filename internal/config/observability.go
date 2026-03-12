@@ -124,9 +124,14 @@ func deriveLoggerContext(parent LoggerContext, cfg *ObservabilityConfig) LoggerC
 }
 
 // EventLogger creates a pre-configured sub-logger for a specific event type.
-// The returned logger has the "event" field baked in, its writer set according
-// to any per-event log_format override, and its level set according to the
-// per-event config. If eventCfg is nil the logger inherits the base settings.
+// The returned logger has the "event" field baked in.
+//
+// Override precedence (applied in order):
+//  1. LogFormat -- output format is always applied first
+//  2. Enabled=false -- disables the event entirely (zerolog.Disabled), overrides LogLevel
+//  3. LogLevel -- sets the minimum severity threshold
+//
+// If eventCfg is nil the logger inherits all base settings unchanged.
 func EventLogger(logCtx LoggerContext, eventName string, eventCfg *EventLoggingConfig) zerolog.Logger {
 	logger := logCtx.Logger.With().Str("event", eventName).Logger()
 	if eventCfg == nil {
@@ -157,6 +162,70 @@ func createWriter(format string, fallback io.Writer) io.Writer {
 		return fallback
 	default:
 		return fallback
+	}
+}
+
+// ValidateObservabilityConfig checks that all log_level and log_format values
+// in the config (both base and per-event) are recognized. Returns an error on
+// the first unrecognized value so operators get fast feedback on typos.
+func ValidateObservabilityConfig(cfg *ObservabilityConfig) error {
+	if cfg == nil {
+		return nil
+	}
+	if err := validateLogLevel("observability.log_level", cfg.LogLevel); err != nil {
+		return err
+	}
+	if err := validateLogFormat("observability.log_format", cfg.LogFormat); err != nil {
+		return err
+	}
+
+	events := map[string]*EventLoggingConfig{
+		"token_issuance":   cfg.TokenIssuance,
+		"token_exchange":   cfg.TokenExchange,
+		"authz_check":      cfg.AuthzCheck,
+		"config_reload":    cfg.ConfigReload,
+		"datasource_cache": cfg.DataSourceCache,
+		"key_rotation":     cfg.KeyRotation,
+		"key_provider":     cfg.KeyProvider,
+		"trust_validation": cfg.TrustValidation,
+		"jwks_cache":       cfg.JWKSCache,
+		"server_lifecycle": cfg.ServerLifecycle,
+	}
+	for name, ecfg := range events {
+		if ecfg == nil {
+			continue
+		}
+		if err := validateLogLevel("observability."+name+".log_level", ecfg.LogLevel); err != nil {
+			return err
+		}
+		if err := validateLogFormat("observability."+name+".log_format", ecfg.LogFormat); err != nil {
+			return err
+		}
+	}
+
+	for i := range cfg.Observers {
+		if err := ValidateObservabilityConfig(&cfg.Observers[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateLogLevel(field, value string) error {
+	switch strings.ToLower(value) {
+	case "", "debug", "info", "warn", "warning", "error":
+		return nil
+	default:
+		return fmt.Errorf("invalid %s %q (valid: debug, info, warn, error)", field, value)
+	}
+}
+
+func validateLogFormat(field, value string) error {
+	switch strings.ToLower(value) {
+	case "", "json", "text":
+		return nil
+	default:
+		return fmt.Errorf("invalid %s %q (valid: json, text)", field, value)
 	}
 }
 

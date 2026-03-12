@@ -50,9 +50,7 @@ func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper, trustOb
 		opts = append(opts, trust.WithValidatorFilter(filter))
 	}
 
-	if trustObs != nil {
-		opts = append(opts, trust.WithTrustValidationObserver(trustObs))
-	}
+	opts = append(opts, trust.WithTrustValidationObserver(trustObs))
 
 	store, err := trust.NewFilteredStore(opts...)
 	if err != nil {

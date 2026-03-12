@@ -10,13 +10,17 @@ var _ server.ServerLifecycleObserver = (*LoggingServerLifecycleObserver)(nil)
 
 // LoggingServerLifecycleObserver logs server lifecycle events via zerolog.
 type LoggingServerLifecycleObserver struct {
-	Logger zerolog.Logger
+	logger zerolog.Logger
+}
+
+func NewLoggingServerLifecycleObserver(logger zerolog.Logger) *LoggingServerLifecycleObserver {
+	return &LoggingServerLifecycleObserver{logger: logger}
 }
 
 func (o *LoggingServerLifecycleObserver) GRPCServeFailed(err error) {
-	o.Logger.Error().Err(err).Msg("gRPC server error")
+	o.logger.Error().Err(err).Msg("gRPC server error")
 }
 
 func (o *LoggingServerLifecycleObserver) HTTPServeFailed(err error) {
-	o.Logger.Error().Err(err).Msg("HTTP server error")
+	o.logger.Error().Err(err).Msg("HTTP server error")
 }

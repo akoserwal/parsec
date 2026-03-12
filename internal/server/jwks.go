@@ -48,11 +48,11 @@ type JWKSServerConfig struct {
 	// Clock is used for time operations (defaults to system clock)
 	Clock clock.Clock
 
-	// Observer for JWKS cache events. Nil means no events are emitted.
+	// Observer must be non-nil; use NoopObserver{} in tests.
 	Observer JWKSObserver
 }
 
-// NewJWKSServer creates a new JWKS server with caching
+// NewJWKSServer creates a new JWKS server with caching.
 func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 	if cfg.RefreshInterval == 0 {
 		cfg.RefreshInterval = 1 * time.Minute
@@ -72,18 +72,14 @@ func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 func (s *JWKSServer) Start(ctx context.Context) error {
 	// Populate cache immediately
 	if err := s.refreshCache(ctx); err != nil {
-		if s.observer != nil {
-			s.observer.InitialCachePopulationFailed(err)
-		}
+		s.observer.InitialCachePopulationFailed(err)
 	}
 
 	// Start background refresh
 	s.ticker = s.clock.Ticker(s.refreshInterval)
 	return s.ticker.Start(func(ctx context.Context) {
 		if err := s.refreshCache(ctx); err != nil {
-			if s.observer != nil {
-				s.observer.CacheRefreshFailed(err)
-			}
+			s.observer.CacheRefreshFailed(err)
 		}
 	})
 }
@@ -159,9 +155,7 @@ func (s *JWKSServer) buildJWKSResponse(ctx context.Context) (*parsecv1.GetJWKSRe
 	for _, pk := range publicKeys {
 		jwk, err := convertToJSONWebKey(pk)
 		if err != nil {
-			if s.observer != nil {
-				s.observer.KeyConversionFailed(pk.KeyID, err)
-			}
+			s.observer.KeyConversionFailed(pk.KeyID, err)
 			continue
 		}
 		allKeys = append(allKeys, jwk)

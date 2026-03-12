@@ -12,8 +12,19 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-// Provider constructs all application components from configuration
-// This is the main entry point for building a configured parsec instance
+// ProviderDeps groups the external dependencies injected into a Provider at
+// construction time. All observer fields must be non-nil; domain constructors
+// call observer methods unconditionally.
+type ProviderDeps struct {
+	Observer            service.ApplicationObserver
+	KeyRotationObserver keys.KeyRotationObserver
+	KeyProviderObserver keys.KeyProviderObserver
+	TrustObserver       trust.TrustValidationObserver
+	CacheObserver       datasource.DataSourceCacheObserver
+}
+
+// Provider constructs all application components from configuration.
+// Create one with NewProvider.
 type Provider struct {
 	config *Config
 
@@ -32,47 +43,31 @@ type Provider struct {
 	cacheObserver        datasource.DataSourceCacheObserver
 }
 
-// NewProvider creates a new provider from configuration
-func NewProvider(config *Config) *Provider {
-	return &Provider{
-		config: config,
+// NewProvider creates a new provider from configuration and optional deps.
+// All observer fields must be non-nil; domain constructors call observer
+// methods unconditionally. Without deps, the provider builds the application
+// observer from config on demand.
+func NewProvider(config *Config, deps ...ProviderDeps) *Provider {
+	p := &Provider{config: config}
+	if len(deps) > 0 {
+		d := deps[0]
+		p.observer = d.Observer
+		p.keyRotationObserver = d.KeyRotationObserver
+		p.keyProviderObserver = d.KeyProviderObserver
+		p.trustObserver = d.TrustObserver
+		p.cacheObserver = d.CacheObserver
 	}
-}
-
-// SetObserver sets the application observer for all components built by this provider.
-// Must be called before TokenService() or any method that depends on the observer.
-func (p *Provider) SetObserver(observer service.ApplicationObserver) {
-	p.observer = observer
-}
-
-// SetKeyObservers sets the key rotation and key provider observers.
-// Must be called before IssuerRegistry().
-func (p *Provider) SetKeyObservers(rot keys.KeyRotationObserver, prov keys.KeyProviderObserver) {
-	p.keyRotationObserver = rot
-	p.keyProviderObserver = prov
-}
-
-// SetTrustObserver sets the trust validation observer.
-// Must be called before TrustStore().
-func (p *Provider) SetTrustObserver(obs trust.TrustValidationObserver) {
-	p.trustObserver = obs
-}
-
-// SetCacheObserver sets the data source cache observer.
-// Must be called before DataSourceRegistry().
-func (p *Provider) SetCacheObserver(obs datasource.DataSourceCacheObserver) {
-	p.cacheObserver = obs
+	return p
 }
 
 // Observer returns the configured application observer.
-// If SetObserver was called, returns that observer.
-// Otherwise, creates a default observer from config.
+// If one was provided via ProviderDeps, it is returned directly.
+// Otherwise, a default observer is built from config.
 func (p *Provider) Observer() (service.ApplicationObserver, error) {
 	if p.observer != nil {
 		return p.observer, nil
 	}
 
-	// Build from config (fallback when SetObserver was not called)
 	observer, err := NewObserver(p.config.Observability)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create observer: %w", err)

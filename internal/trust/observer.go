@@ -1,7 +1,6 @@
 package trust
 
 // TrustValidationObserver receives events from FilteredStore during credential validation.
-// A nil observer means no events are emitted.
 type TrustValidationObserver interface {
 	// ValidatorFailed is called when an individual validator fails during
 	// multi-validator validation. These intermediate errors are otherwise lost
@@ -19,3 +18,12 @@ type TrustValidationObserver interface {
 	// for a specific validator.
 	FilterEvaluationFailed(validatorName string, err error)
 }
+
+// NoopObserver satisfies TrustValidationObserver with empty methods.
+// Useful in tests that don't care about observer events.
+type NoopObserver struct{}
+
+func (NoopObserver) ValidatorFailed(string, CredentialType, error)  {}
+func (NoopObserver) AllValidatorsFailed(CredentialType, int, error) {}
+func (NoopObserver) ValidatorFiltered(string, string)               {}
+func (NoopObserver) FilterEvaluationFailed(string, error)           {}
