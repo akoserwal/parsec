@@ -11,11 +11,15 @@ var _ trust.TrustValidationObserver = (*LoggingTrustValidationObserver)(nil)
 
 // LoggingTrustValidationObserver logs trust validation events via zerolog.
 type LoggingTrustValidationObserver struct {
-	Logger zerolog.Logger
+	logger zerolog.Logger
+}
+
+func NewLoggingTrustValidationObserver(logger zerolog.Logger) *LoggingTrustValidationObserver {
+	return &LoggingTrustValidationObserver{logger: logger}
 }
 
 func (o *LoggingTrustValidationObserver) ValidatorFailed(validatorName string, credType trust.CredentialType, err error) {
-	o.Logger.Debug().
+	o.logger.Debug().
 		Err(err).
 		Str("validator", validatorName).
 		Str("credential_type", string(credType)).
@@ -23,7 +27,7 @@ func (o *LoggingTrustValidationObserver) ValidatorFailed(validatorName string, c
 }
 
 func (o *LoggingTrustValidationObserver) AllValidatorsFailed(credType trust.CredentialType, attempted int, lastErr error) {
-	o.Logger.Warn().
+	o.logger.Warn().
 		Err(lastErr).
 		Str("credential_type", string(credType)).
 		Int("attempted", attempted).
@@ -31,14 +35,14 @@ func (o *LoggingTrustValidationObserver) AllValidatorsFailed(credType trust.Cred
 }
 
 func (o *LoggingTrustValidationObserver) ValidatorFiltered(validatorName string, actorSubject string) {
-	o.Logger.Debug().
+	o.logger.Debug().
 		Str("validator", validatorName).
 		Str("actor", actorSubject).
 		Msg("validator filtered out for actor")
 }
 
 func (o *LoggingTrustValidationObserver) FilterEvaluationFailed(validatorName string, err error) {
-	o.Logger.Error().
+	o.logger.Error().
 		Err(err).
 		Str("validator", validatorName).
 		Msg("filter evaluation failed")

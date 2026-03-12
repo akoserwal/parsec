@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/project-kessel/parsec/internal/config"
+	"github.com/project-kessel/parsec/internal/datasource"
+	"github.com/project-kessel/parsec/internal/keys"
 	"github.com/project-kessel/parsec/internal/probe"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
@@ -28,13 +30,13 @@ type infraEventConfigs struct {
 }
 
 type wiredInfraObservers struct {
-	configReload    *probe.LoggingConfigReloadObserver
-	keyRotation     *probe.LoggingKeyRotationObserver
-	keyProvider     *probe.LoggingKeyProviderObserver
-	trustValidation *probe.LoggingTrustValidationObserver
-	dataSourceCache *probe.LoggingDataSourceCacheObserver
-	jwksCache       *probe.LoggingJWKSObserver
-	serverLifecycle *probe.LoggingServerLifecycleObserver
+	configReload    config.ConfigReloadObserver
+	keyRotation     keys.KeyRotationObserver
+	keyProvider     keys.KeyProviderObserver
+	trustValidation trust.TrustValidationObserver
+	dataSourceCache datasource.DataSourceCacheObserver
+	jwksCache       server.JWKSObserver
+	serverLifecycle server.ServerLifecycleObserver
 }
 
 type runtimeComponents struct {
@@ -62,27 +64,13 @@ func buildInfraEventConfigs(obs *config.ObservabilityConfig) infraEventConfigs {
 
 func wireInfraObservers(logCtx config.LoggerContext, infraCfg infraEventConfigs) wiredInfraObservers {
 	return wiredInfraObservers{
-		configReload: &probe.LoggingConfigReloadObserver{
-			Logger: config.EventLogger(logCtx, "config_reload", infraCfg.configReload),
-		},
-		keyRotation: &probe.LoggingKeyRotationObserver{
-			Logger: config.EventLogger(logCtx, "key_rotation", infraCfg.keyRotation),
-		},
-		keyProvider: &probe.LoggingKeyProviderObserver{
-			Logger: config.EventLogger(logCtx, "key_provider", infraCfg.keyProvider),
-		},
-		trustValidation: &probe.LoggingTrustValidationObserver{
-			Logger: config.EventLogger(logCtx, "trust_validation", infraCfg.trustValidation),
-		},
-		dataSourceCache: &probe.LoggingDataSourceCacheObserver{
-			Logger: config.EventLogger(logCtx, "datasource_cache", infraCfg.dataSourceCache),
-		},
-		jwksCache: &probe.LoggingJWKSObserver{
-			Logger: config.EventLogger(logCtx, "jwks_cache", infraCfg.jwksCache),
-		},
-		serverLifecycle: &probe.LoggingServerLifecycleObserver{
-			Logger: config.EventLogger(logCtx, "server_lifecycle", infraCfg.serverLifecycle),
-		},
+		configReload:    probe.NewLoggingConfigReloadObserver(config.EventLogger(logCtx, "config_reload", infraCfg.configReload)),
+		keyRotation:     probe.NewLoggingKeyRotationObserver(config.EventLogger(logCtx, "key_rotation", infraCfg.keyRotation)),
+		keyProvider:     probe.NewLoggingKeyProviderObserver(config.EventLogger(logCtx, "key_provider", infraCfg.keyProvider)),
+		trustValidation: probe.NewLoggingTrustValidationObserver(config.EventLogger(logCtx, "trust_validation", infraCfg.trustValidation)),
+		dataSourceCache: probe.NewLoggingDataSourceCacheObserver(config.EventLogger(logCtx, "datasource_cache", infraCfg.dataSourceCache)),
+		jwksCache:       probe.NewLoggingJWKSObserver(config.EventLogger(logCtx, "jwks_cache", infraCfg.jwksCache)),
+		serverLifecycle: probe.NewLoggingServerLifecycleObserver(config.EventLogger(logCtx, "server_lifecycle", infraCfg.serverLifecycle)),
 	}
 }
 
@@ -184,10 +172,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	// 3. Create provider to build all components from config
-	provider := config.NewProvider(cfg)
+	// 2a. Validate observability config early so typos surface at startup
+	if err := config.ValidateObservabilityConfig(cfg.Observability); err != nil {
+		return fmt.Errorf("invalid observability config: %w", err)
+	}
 
-	// 4. Create logger and observer — single instance shared across all components
+	// 3. Create logger, observers, then provider (observers must exist before provider)
 	logCtx := config.NewLoggerContext(cfg.Observability)
 	logger := logCtx.Logger
 	infraCfg := buildInfraEventConfigs(cfg.Observability)
@@ -199,14 +189,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create observer: %w", err)
 	}
 
-	// Inject into provider so TokenService and other internal components use the same observer
-	provider.SetObserver(observer)
-	provider.SetKeyObservers(
-		infraObservers.keyRotation,
-		infraObservers.keyProvider,
-	)
-	provider.SetTrustObserver(infraObservers.trustValidation)
-	provider.SetCacheObserver(infraObservers.dataSourceCache)
+	// 4. Create provider with all dependencies upfront — no temporal coupling
+	provider := config.NewProvider(cfg, config.ProviderDeps{
+		Observer:            observer,
+		KeyRotationObserver: infraObservers.keyRotation,
+		KeyProviderObserver: infraObservers.keyProvider,
+		TrustObserver:       infraObservers.trustValidation,
+		CacheObserver:       infraObservers.dataSourceCache,
+	})
 
 	// 5. Build components via provider
 	components, err := buildRuntimeComponents(provider)

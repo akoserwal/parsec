@@ -1,7 +1,6 @@
 package keys
 
 // KeyRotationObserver receives key rotation lifecycle events from DualSlotRotatingSigner.
-// Implementations are injected at construction time. A nil observer means no events are emitted.
 type KeyRotationObserver interface {
 	RotationCheckFailed(err error)
 	ActiveKeyCacheUpdateFailed(err error)
@@ -15,7 +14,21 @@ type KeyRotationObserver interface {
 }
 
 // KeyProviderObserver receives key provider lifecycle events from AWSKMSKeyProvider.
-// A nil observer means no events are emitted.
 type KeyProviderObserver interface {
 	OldKeyDeletionFailed(keyID string, err error)
 }
+
+// NoopObserver satisfies both KeyRotationObserver and KeyProviderObserver
+// with empty methods. Useful in tests that don't care about observer events.
+type NoopObserver struct{}
+
+func (NoopObserver) RotationCheckFailed(error)          {}
+func (NoopObserver) ActiveKeyCacheUpdateFailed(error)   {}
+func (NoopObserver) RotationCompleted(string)           {}
+func (NoopObserver) RotationSkippedVersionRace(string)  {}
+func (NoopObserver) KeyProviderNotFound(string, string) {}
+func (NoopObserver) KeyHandleFailed(string, error)      {}
+func (NoopObserver) PublicKeyFailed(string, error)      {}
+func (NoopObserver) ThumbprintFailed(string, error)     {}
+func (NoopObserver) MetadataFailed(string, error)       {}
+func (NoopObserver) OldKeyDeletionFailed(string, error) {}

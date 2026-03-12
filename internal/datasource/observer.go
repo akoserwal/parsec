@@ -1,7 +1,6 @@
 package datasource
 
 // DataSourceCacheObserver receives cache lifecycle events from InMemoryCachingDataSource.
-// A nil observer means no events are emitted.
 type DataSourceCacheObserver interface {
 	// CacheHit is called when a fetch is served from cache.
 	CacheHit(dataSourceName string)
@@ -15,3 +14,12 @@ type DataSourceCacheObserver interface {
 	// FetchFailed is called when the underlying data source fetch fails on a cache miss.
 	FetchFailed(dataSourceName string, err error)
 }
+
+// NoopObserver satisfies DataSourceCacheObserver with empty methods.
+// Useful in tests that don't care about observer events.
+type NoopObserver struct{}
+
+func (NoopObserver) CacheHit(string)           {}
+func (NoopObserver) CacheMiss(string)          {}
+func (NoopObserver) CacheExpired(string)       {}
+func (NoopObserver) FetchFailed(string, error) {}

@@ -120,11 +120,7 @@ func buildHTTPConfig(cfg *HTTPConfig, transport http.RoundTripper) (*luaservices
 func wrapWithCaching(ds service.DataSource, cfg CachingConfig, cacheObs datasource.DataSourceCacheObserver) (service.DataSource, error) {
 	switch cfg.Type {
 	case "in_memory":
-		var opts []datasource.InMemoryCachingDataSourceOption
-		if cacheObs != nil {
-			opts = append(opts, datasource.WithCacheObserver(cacheObs))
-		}
-		return datasource.NewInMemoryCachingDataSource(ds, opts...), nil
+		return datasource.NewInMemoryCachingDataSource(ds, datasource.WithCacheObserver(cacheObs)), nil
 
 	case "distributed":
 		groupName := cfg.GroupName
