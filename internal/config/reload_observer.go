@@ -1,7 +1,12 @@
 package config
 
 // ConfigReloadObserver receives configuration reload events from Loader.
-// A nil observer means no events are emitted.
 type ConfigReloadObserver interface {
 	ConfigReloadFailed(step string, err error)
 }
+
+// NoopConfigReloadObserver satisfies ConfigReloadObserver with empty methods.
+// Useful in tests that don't care about observer events.
+type NoopConfigReloadObserver struct{}
+
+func (NoopConfigReloadObserver) ConfigReloadFailed(string, error) {}

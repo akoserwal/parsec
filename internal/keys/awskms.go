@@ -31,10 +31,11 @@ type AWSKMSConfig struct {
 	Region      string
 	AliasPrefix string
 	Client      *kms.Client
-	Observer    KeyProviderObserver
+	// Observer must be non-nil; use NoopObserver{} in tests.
+	Observer KeyProviderObserver
 }
 
-// NewAWSKMSKeyProvider creates a new AWS KMS key provider
+// NewAWSKMSKeyProvider creates a new AWS KMS key provider.
 func NewAWSKMSKeyProvider(ctx context.Context, cfg AWSKMSConfig) (*AWSKMSKeyProvider, error) {
 	if cfg.KeyType == "" {
 		return nil, fmt.Errorf("key_type is required")
@@ -140,7 +141,7 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 			KeyId:               aws.String(oldKeyID),
 			PendingWindowInDays: aws.Int32(7),
 		})
-		if err != nil && m.observer != nil {
+		if err != nil {
 			m.observer.OldKeyDeletionFailed(oldKeyID, err)
 		}
 	}

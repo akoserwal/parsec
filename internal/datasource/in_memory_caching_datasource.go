@@ -39,30 +39,28 @@ func WithClock(clk clock.Clock) InMemoryCachingDataSourceOption {
 	}
 }
 
-// WithCacheObserver sets the observer for cache lifecycle events
+// WithCacheObserver sets the observer for cache lifecycle events.
 func WithCacheObserver(obs DataSourceCacheObserver) InMemoryCachingDataSourceOption {
 	return func(ds *InMemoryCachingDataSource) {
 		ds.observer = obs
 	}
 }
 
-// NewInMemoryCachingDataSource wraps a data source with in-memory caching if it implements Cacheable
-// Returns the original source if it doesn't implement Cacheable
+// NewInMemoryCachingDataSource wraps a data source with in-memory caching if it implements Cacheable.
+// Returns the original source if it doesn't implement Cacheable.
 func NewInMemoryCachingDataSource(source service.DataSource, opts ...InMemoryCachingDataSourceOption) service.DataSource {
 	cacheable, ok := source.(service.Cacheable)
 	if !ok {
-		// Source is not cacheable, return as-is
 		return source
 	}
 
 	ds := &InMemoryCachingDataSource{
 		source:    source,
 		cacheable: cacheable,
-		clock:     clock.NewSystemClock(), // Default to system clock
+		clock:     clock.NewSystemClock(),
 		entries:   make(map[string]*cacheEntry),
 	}
 
-	// Apply options
 	for _, opt := range opts {
 		opt(ds)
 	}
@@ -95,30 +93,21 @@ func (c *InMemoryCachingDataSource) Fetch(ctx context.Context, input *service.Da
 	if found {
 		// Check if entry has expired
 		if entry.expiresAt.IsZero() || c.clock.Now().Before(entry.expiresAt) {
-			if c.observer != nil {
-				c.observer.CacheHit(c.source.Name())
-			}
+			c.observer.CacheHit(c.source.Name())
 			return entry.result, nil
 		}
-		// Entry expired, remove it
-		if c.observer != nil {
-			c.observer.CacheExpired(c.source.Name())
-		}
+		c.observer.CacheExpired(c.source.Name())
 		c.mu.Lock()
 		delete(c.entries, cacheKeyStr)
 		c.mu.Unlock()
 	}
 
-	if c.observer != nil {
-		c.observer.CacheMiss(c.source.Name())
-	}
+	c.observer.CacheMiss(c.source.Name())
 
 	// Cache miss - fetch from source using the original (full) input
 	result, err := c.source.Fetch(ctx, input)
 	if err != nil {
-		if c.observer != nil {
-			c.observer.FetchFailed(c.source.Name(), err)
-		}
+		c.observer.FetchFailed(c.source.Name(), err)
 		return nil, err
 	}
 

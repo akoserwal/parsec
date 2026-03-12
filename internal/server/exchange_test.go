@@ -25,6 +25,7 @@ func TestExchangeServer_WithActorFiltering(t *testing.T) {
 	// Setup filtered trust store with CEL-based filtering
 	filteredStore, err := trust.NewFilteredStore(
 		trust.WithCELFilter(`actor.trust_domain == "client.example.com" && validator_name in ["external-validator"]`),
+		trust.WithTrustValidationObserver(trust.NoopObserver{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create filtered store: %v", err)
@@ -107,6 +108,7 @@ func TestExchangeServer_WithActorFiltering(t *testing.T) {
 		// Create a new store with the client validator
 		storeWithClient, err := trust.NewFilteredStore(
 			trust.WithCELFilter(`actor.trust_domain == "client.example.com" && validator_name in ["external-validator"]`),
+			trust.WithTrustValidationObserver(trust.NoopObserver{}),
 		)
 		if err != nil {
 			t.Fatalf("failed to create store: %v", err)
@@ -187,6 +189,7 @@ func TestExchangeServer_WithActorFiltering(t *testing.T) {
 				(has(actor.claims.role) && actor.claims.role == "admin" && validator_name == "admin-validator") ||
 				(has(actor.claims.role) && actor.claims.role == "user" && validator_name == "user-validator")
 			`),
+			trust.WithTrustValidationObserver(trust.NoopObserver{}),
 		)
 		if err != nil {
 			t.Fatalf("failed to create store: %v", err)
@@ -262,6 +265,7 @@ func TestExchangeServer_WithActorFilteringByAudience(t *testing.T) {
 			(validator_name == "prod-validator" && has(request.additional.requested_audience) && request.additional.requested_audience == "prod.example.com") ||
 			(validator_name == "dev-validator" && has(request.additional.requested_audience) && request.additional.requested_audience == "dev.example.com")
 		`),
+		trust.WithTrustValidationObserver(trust.NoopObserver{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create filtered store: %v", err)

@@ -31,7 +31,7 @@ func assertLog(t *testing.T, out, level, msg string, fields ...string) {
 
 func TestLoggingConfigReloadObserver_ConfigReloadFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &LoggingConfigReloadObserver{Logger: testLogger(&buf)}
+	obs := NewLoggingConfigReloadObserver(testLogger(&buf))
 
 	obs.ConfigReloadFailed("unmarshal", errors.New("bad yaml"))
 
@@ -54,7 +54,7 @@ func TestLoggingDataSourceCacheObserver_DebugEvents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			obs := &LoggingDataSourceCacheObserver{Logger: testLogger(&buf)}
+			obs := NewLoggingDataSourceCacheObserver(testLogger(&buf))
 			tt.call(obs)
 			assertLog(t, buf.String(), "debug", tt.msg, `"datasource":"ds"`)
 		})
@@ -63,7 +63,7 @@ func TestLoggingDataSourceCacheObserver_DebugEvents(t *testing.T) {
 
 func TestLoggingDataSourceCacheObserver_FetchFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &LoggingDataSourceCacheObserver{Logger: testLogger(&buf)}
+	obs := NewLoggingDataSourceCacheObserver(testLogger(&buf))
 
 	obs.FetchFailed("my_ds", errors.New("timeout"))
 
@@ -75,7 +75,7 @@ func TestLoggingDataSourceCacheObserver_FetchFailed(t *testing.T) {
 
 func TestLoggingKeyRotationObserver_RotationCheckFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &LoggingKeyRotationObserver{Logger: testLogger(&buf)}
+	obs := NewLoggingKeyRotationObserver(testLogger(&buf))
 
 	obs.RotationCheckFailed(errors.New("slot locked"))
 
@@ -98,7 +98,7 @@ func TestLoggingKeyRotationObserver_InfoEvents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			obs := &LoggingKeyRotationObserver{Logger: testLogger(&buf)}
+			obs := NewLoggingKeyRotationObserver(testLogger(&buf))
 			tt.call(obs)
 			assertLog(t, buf.String(), "info", tt.msg,
 				fmt.Sprintf(`"slot":"%s"`, tt.slot))
@@ -108,7 +108,7 @@ func TestLoggingKeyRotationObserver_InfoEvents(t *testing.T) {
 
 func TestLoggingKeyRotationObserver_KeyProviderNotFound(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &LoggingKeyRotationObserver{Logger: testLogger(&buf)}
+	obs := NewLoggingKeyRotationObserver(testLogger(&buf))
 
 	obs.KeyProviderNotFound("aws_kms", "primary")
 
@@ -130,7 +130,7 @@ func TestLoggingKeyRotationObserver_WarningMethods(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			obs := &LoggingKeyRotationObserver{Logger: testLogger(&buf)}
+			obs := NewLoggingKeyRotationObserver(testLogger(&buf))
 			tt.call(obs)
 			assertLog(t, buf.String(), "warn", tt.msg, `"slot":"s1"`)
 		})
@@ -141,7 +141,7 @@ func TestLoggingKeyRotationObserver_WarningMethods(t *testing.T) {
 
 func TestLoggingKeyProviderObserver_OldKeyDeletionFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &LoggingKeyProviderObserver{Logger: testLogger(&buf)}
+	obs := NewLoggingKeyProviderObserver(testLogger(&buf))
 
 	obs.OldKeyDeletionFailed("key-123", errors.New("access denied"))
 
@@ -153,7 +153,7 @@ func TestLoggingKeyProviderObserver_OldKeyDeletionFailed(t *testing.T) {
 
 func TestLoggingTrustValidationObserver_ValidatorFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &LoggingTrustValidationObserver{Logger: testLogger(&buf)}
+	obs := NewLoggingTrustValidationObserver(testLogger(&buf))
 
 	obs.ValidatorFailed("oidc_v1", trust.CredentialTypeJWT, errors.New("expired"))
 
@@ -163,7 +163,7 @@ func TestLoggingTrustValidationObserver_ValidatorFailed(t *testing.T) {
 
 func TestLoggingTrustValidationObserver_AllValidatorsFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &LoggingTrustValidationObserver{Logger: testLogger(&buf)}
+	obs := NewLoggingTrustValidationObserver(testLogger(&buf))
 
 	obs.AllValidatorsFailed(trust.CredentialTypeBearer, 3, errors.New("no match"))
 
@@ -173,7 +173,7 @@ func TestLoggingTrustValidationObserver_AllValidatorsFailed(t *testing.T) {
 
 func TestLoggingTrustValidationObserver_ValidatorFiltered(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &LoggingTrustValidationObserver{Logger: testLogger(&buf)}
+	obs := NewLoggingTrustValidationObserver(testLogger(&buf))
 
 	obs.ValidatorFiltered("v1", "actor-xyz")
 
@@ -183,7 +183,7 @@ func TestLoggingTrustValidationObserver_ValidatorFiltered(t *testing.T) {
 
 func TestLoggingTrustValidationObserver_FilterEvaluationFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &LoggingTrustValidationObserver{Logger: testLogger(&buf)}
+	obs := NewLoggingTrustValidationObserver(testLogger(&buf))
 
 	obs.FilterEvaluationFailed("v2", errors.New("cel error"))
 
@@ -216,7 +216,7 @@ func TestLoggingJWKSObserver(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			obs := &LoggingJWKSObserver{Logger: testLogger(&buf)}
+			obs := NewLoggingJWKSObserver(testLogger(&buf))
 			tt.call(obs)
 			assertLog(t, buf.String(), "warn", tt.msg, tt.fields...)
 		})
@@ -237,7 +237,7 @@ func TestLoggingServerLifecycleObserver(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			obs := &LoggingServerLifecycleObserver{Logger: testLogger(&buf)}
+			obs := NewLoggingServerLifecycleObserver(testLogger(&buf))
 			tt.call(obs)
 			assertLog(t, buf.String(), "error", tt.msg)
 		})

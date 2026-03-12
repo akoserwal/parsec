@@ -128,7 +128,6 @@ func newLoader(configPath string, flags *pflag.FlagSet) (*Loader, error) {
 }
 
 // SetObserver sets the observer for config reload events.
-// Call this after the logger is created from the loaded config.
 func (l *Loader) SetObserver(observer ConfigReloadObserver) {
 	l.observer = observer
 }
@@ -160,31 +159,23 @@ func (l *Loader) Watch(ctx context.Context, onChange func(*Config) error) error 
 	// Set up file watcher
 	if err := fp.Watch(func(event interface{}, err error) {
 		if err != nil {
-			if l.observer != nil {
-				l.observer.ConfigReloadFailed("watch", err)
-			}
+			l.observer.ConfigReloadFailed("watch", err)
 			return
 		}
 
 		parser, err := getParserForFile(l.configPath)
 		if err != nil {
-			if l.observer != nil {
-				l.observer.ConfigReloadFailed("parser", err)
-			}
+			l.observer.ConfigReloadFailed("parser", err)
 			return
 		}
 
 		k := koanf.New(".")
 		if err := k.Load(confmap.Provider(getDefaults(), "."), nil); err != nil {
-			if l.observer != nil {
-				l.observer.ConfigReloadFailed("defaults", err)
-			}
+			l.observer.ConfigReloadFailed("defaults", err)
 			return
 		}
 		if err := k.Load(fp, parser); err != nil {
-			if l.observer != nil {
-				l.observer.ConfigReloadFailed("reload", err)
-			}
+			l.observer.ConfigReloadFailed("reload", err)
 			return
 		}
 
@@ -194,26 +185,20 @@ func (l *Loader) Watch(ctx context.Context, onChange func(*Config) error) error 
 				return envTransform(k), v
 			},
 		}), nil); err != nil {
-			if l.observer != nil {
-				l.observer.ConfigReloadFailed("env", err)
-			}
+			l.observer.ConfigReloadFailed("env", err)
 			return
 		}
 
 		var cfg Config
 		if err := k.Unmarshal("", &cfg); err != nil {
-			if l.observer != nil {
-				l.observer.ConfigReloadFailed("unmarshal", err)
-			}
+			l.observer.ConfigReloadFailed("unmarshal", err)
 			return
 		}
 
 		l.k = k
 
 		if err := onChange(&cfg); err != nil {
-			if l.observer != nil {
-				l.observer.ConfigReloadFailed("onChange", err)
-			}
+			l.observer.ConfigReloadFailed("onChange", err)
 		}
 	}); err != nil {
 		return fmt.Errorf("failed to watch config file: %w", err)

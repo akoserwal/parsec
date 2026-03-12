@@ -63,6 +63,14 @@ func (m *mockNonCacheableDataSource) Fetch(ctx context.Context, input *service.D
 	}, nil
 }
 
+// newTestCachingDataSource wraps a source with in-memory caching and a
+// NoopObserver. Callers can pass additional options (e.g. WithClock).
+func newTestCachingDataSource(t *testing.T, source service.DataSource, opts ...InMemoryCachingDataSourceOption) service.DataSource {
+	t.Helper()
+	allOpts := append([]InMemoryCachingDataSourceOption{WithCacheObserver(NoopObserver{})}, opts...)
+	return NewInMemoryCachingDataSource(source, allOpts...)
+}
+
 func TestInMemoryCachingDataSource(t *testing.T) {
 	ctx := context.Background()
 
@@ -72,7 +80,7 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 			ttl:  1 * time.Hour,
 		}
 
-		cached := NewInMemoryCachingDataSource(source)
+		cached := newTestCachingDataSource(t, source)
 
 		input := &service.DataSourceInput{
 			Subject: &trust.Result{
@@ -114,7 +122,7 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 			ttl:  50 * time.Millisecond,
 		}
 
-		cached := NewInMemoryCachingDataSource(source, WithClock(clk))
+		cached := newTestCachingDataSource(t, source, WithClock(clk))
 
 		input := &service.DataSourceInput{
 			Subject: &trust.Result{
@@ -150,7 +158,7 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 			ttl:  1 * time.Hour,
 		}
 
-		cached := NewInMemoryCachingDataSource(source)
+		cached := newTestCachingDataSource(t, source)
 
 		input1 := &service.DataSourceInput{
 			Subject: &trust.Result{
@@ -204,7 +212,7 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 			ttl:  50 * time.Millisecond,
 		}
 
-		cached := NewInMemoryCachingDataSource(source, WithClock(clk)).(*InMemoryCachingDataSource)
+		cached := newTestCachingDataSource(t, source, WithClock(clk)).(*InMemoryCachingDataSource)
 
 		input := &service.DataSourceInput{
 			Subject: &trust.Result{
