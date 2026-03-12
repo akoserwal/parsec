@@ -148,3 +148,57 @@ func TestEventLogger_FormatAndLevel_Combined(t *testing.T) {
 	assert.False(t, json.Valid([]byte(output)),
 		"should be text format, not JSON; got: %s", output)
 }
+
+func TestDeriveLoggerContext(t *testing.T) {
+	t.Run("child level override applies", func(t *testing.T) {
+		var buf bytes.Buffer
+		parent := LoggerContext{
+			Logger: zerolog.New(&buf).With().Timestamp().Logger().Level(zerolog.InfoLevel),
+			Writer: &buf,
+		}
+		child := deriveLoggerContext(parent, &ObservabilityConfig{LogLevel: "debug"})
+
+		child.Logger.Debug().Msg("child debug")
+		assert.Contains(t, buf.String(), "child debug",
+			"child log_level=debug should widen the parent's info level")
+	})
+
+	t.Run("child format override applies", func(t *testing.T) {
+		var buf bytes.Buffer
+		parent := LoggerContext{
+			Logger: zerolog.New(&buf).With().Timestamp().Logger().Level(zerolog.InfoLevel),
+			Writer: &buf,
+		}
+		child := deriveLoggerContext(parent, &ObservabilityConfig{LogFormat: "text"})
+
+		child.Logger.Info().Msg("text child")
+		output := buf.String()
+		require.NotEmpty(t, output)
+		assert.False(t, json.Valid([]byte(output)),
+			"child log_format=text should override parent JSON; got: %s", output)
+	})
+
+	t.Run("no overrides returns parent as-is", func(t *testing.T) {
+		var buf bytes.Buffer
+		parent := LoggerContext{
+			Logger: zerolog.New(&buf).With().Timestamp().Logger().Level(zerolog.WarnLevel),
+			Writer: &buf,
+		}
+		child := deriveLoggerContext(parent, &ObservabilityConfig{})
+
+		child.Logger.Info().Msg("should not appear")
+		assert.Empty(t, buf.String(), "child with no overrides should inherit parent warn level")
+	})
+
+	t.Run("shares parent raw sink", func(t *testing.T) {
+		var buf bytes.Buffer
+		parent := LoggerContext{
+			Logger: zerolog.New(&buf).With().Timestamp().Logger().Level(zerolog.InfoLevel),
+			Writer: &buf,
+		}
+		child := deriveLoggerContext(parent, &ObservabilityConfig{LogLevel: "debug"})
+
+		assert.Equal(t, parent.Writer, child.Writer,
+			"child must share the parent's raw sink")
+	})
+}
