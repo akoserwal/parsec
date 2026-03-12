@@ -89,7 +89,8 @@ func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (servi
 
 	var observers []service.ApplicationObserver
 	for i, subCfg := range cfg.Observers {
-		observer, err := NewObserverWithLogger(&subCfg, logCtx)
+		childLogCtx := deriveLoggerContext(logCtx, &subCfg)
+		observer, err := NewObserverWithLogger(&subCfg, childLogCtx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create observer %d: %w", i, err)
 		}
@@ -97,6 +98,29 @@ func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (servi
 	}
 
 	return service.NewCompositeObserver(observers...), nil
+}
+
+// deriveLoggerContext builds a child LoggerContext that shares the parent's
+// raw sink but applies the child config's LogLevel and/or LogFormat overrides.
+// If the child specifies neither, the parent context is returned as-is.
+func deriveLoggerContext(parent LoggerContext, cfg *ObservabilityConfig) LoggerContext {
+	if cfg == nil || (cfg.LogLevel == "" && cfg.LogFormat == "") {
+		return parent
+	}
+
+	logger := parent.Logger
+
+	if cfg.LogFormat != "" {
+		logger = logger.Output(createWriter(cfg.LogFormat, parent.Writer))
+	}
+	if cfg.LogLevel != "" {
+		logger = logger.Level(parseLogLevel(cfg.LogLevel))
+	}
+
+	return LoggerContext{
+		Logger: logger,
+		Writer: parent.Writer,
+	}
 }
 
 // EventLogger creates a pre-configured sub-logger for a specific event type.
