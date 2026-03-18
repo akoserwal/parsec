@@ -4,15 +4,18 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/project-kessel/parsec/internal/config"
 	"github.com/project-kessel/parsec/internal/datasource"
 	"github.com/project-kessel/parsec/internal/keys"
+	"github.com/project-kessel/parsec/internal/metrics"
 	"github.com/project-kessel/parsec/internal/probe"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
@@ -184,7 +187,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	infraObservers := wireInfraObservers(logCtx, infraCfg)
 	loader.SetObserver(infraObservers.configReload)
 
-	observer, err := config.NewObserverWithLogger(cfg.Observability, logCtx)
+	// 3a. Set up metrics if enabled
+	observerDeps, metricsHandler, metricsPath, shutdownMetrics := setupMetrics(cfg.Observability, logger)
+	if shutdownMetrics != nil {
+		defer func() { _ = shutdownMetrics(ctx) }()
+	}
+
+	observer, err := config.NewObserverWithLogger(cfg.Observability, logCtx, observerDeps)
 	if err != nil {
 		return fmt.Errorf("failed to create observer: %w", err)
 	}
@@ -239,6 +248,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
 		Observer:       infraObservers.serverLifecycle,
+		MetricsHandler: metricsHandler,
+		MetricsPath:    metricsPath,
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
@@ -249,7 +260,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	grpcAddr := grpcListener.Addr().String()
 	httpAddr := httpListener.Addr().String()
-	logger.Info().
+	startupLog := logger.Info().
 		Str("grpc_addr", grpcAddr).
 		Str("http_addr", httpAddr).
 		Str("token_exchange_url", "http://"+httpAddr+"/v1/token").
@@ -257,8 +268,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Str("jwks_wellknown_url", "http://"+httpAddr+"/.well-known/jwks.json").
 		Str("health_grpc", grpcAddr+" (grpc.health.v1.Health)").
 		Str("trust_domain", provider.TrustDomain()).
-		Str("config", configPath).
-		Msg("parsec is running")
+		Str("config", configPath)
+	if metricsHandler != nil {
+		startupLog = startupLog.Str("metrics_url", "http://"+httpAddr+metricsPath)
+	}
+	startupLog.Msg("parsec is running")
 
 	// 9. Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
@@ -274,4 +288,45 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	logger.Info().Msg("Shutdown complete")
 	return nil
+}
+
+// setupMetrics creates the OTel MeterProvider and Prometheus handler when metrics
+// are enabled in config. Returns zero values when metrics are disabled.
+func setupMetrics(obs *config.ObservabilityConfig, logger zerolog.Logger) (
+	deps config.ObserverDeps,
+	handler http.Handler,
+	path string,
+	shutdown func(context.Context) error,
+) {
+	mc := resolveMetricsConfig(obs)
+	if mc == nil || !mc.Enabled {
+		return config.ObserverDeps{}, nil, "", nil
+	}
+
+	mp, err := metrics.NewProvider()
+	if err != nil {
+		logger.Error().Err(err).Msg("Failed to create metrics provider; metrics disabled")
+		return config.ObserverDeps{}, nil, "", nil
+	}
+
+	path = mc.Path
+	if path == "" {
+		path = "/metrics"
+	}
+
+	meter := mp.Meter("parsec")
+	return config.ObserverDeps{
+		MetricsFactory: func() (service.ApplicationObserver, error) {
+			return probe.NewMetricsObserver(meter)
+		},
+	}, mp.Handler(), path, mp.Shutdown
+}
+
+// resolveMetricsConfig finds the MetricsConfig from the observability tree.
+// For composite observers, the top-level Metrics field is authoritative.
+func resolveMetricsConfig(obs *config.ObservabilityConfig) *config.MetricsConfig {
+	if obs == nil {
+		return nil
+	}
+	return obs.Metrics
 }

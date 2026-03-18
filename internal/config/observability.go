@@ -12,6 +12,15 @@ import (
 	"github.com/project-kessel/parsec/internal/service"
 )
 
+// ObserverDeps carries optional dependencies for observer construction.
+// A nil MetricsFactory is fine for logging/noop observers; it is required
+// when type is "metrics" or a composite that includes a metrics sub-observer.
+type ObserverDeps struct {
+	// MetricsFactory creates a metrics observer. The closure captures the
+	// OTel Meter so the config package does not depend on OTel directly.
+	MetricsFactory func() (service.ApplicationObserver, error)
+}
+
 // LoggerContext couples a zerolog logger with its destination writer so
 // per-event formatting overrides can preserve the original sink.
 type LoggerContext struct {
@@ -21,13 +30,18 @@ type LoggerContext struct {
 
 // NewObserver creates an application observer from configuration.
 // This is a convenience wrapper that creates its own logger from cfg.
+// It cannot construct metrics observers; use NewObserverWithLogger with
+// ObserverDeps for type "metrics" or composite observers containing metrics.
 func NewObserver(cfg *ObservabilityConfig) (service.ApplicationObserver, error) {
-	return NewObserverWithLogger(cfg, NewLoggerContext(cfg))
+	if requiresMetricsDeps(cfg) {
+		return nil, fmt.Errorf("observer type %q requires metrics dependencies; use NewObserverWithLogger with ObserverDeps instead of NewObserver", cfg.Type)
+	}
+	return NewObserverWithLogger(cfg, NewLoggerContext(cfg), ObserverDeps{})
 }
 
 // NewObserverWithLogger creates an application observer using the provided logger.
 // Use this when you want the observer to share a logger with other components.
-func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (service.ApplicationObserver, error) {
+func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext, deps ObserverDeps) (service.ApplicationObserver, error) {
 	if cfg == nil {
 		return newNoopObserver(), nil
 	}
@@ -37,10 +51,12 @@ func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (serv
 		return newLoggingObserver(cfg, logCtx), nil
 	case "noop", "":
 		return newNoopObserver(), nil
+	case "metrics":
+		return newMetricsObserver(deps)
 	case "composite":
-		return newCompositeObserver(cfg, logCtx)
+		return newCompositeObserver(cfg, logCtx, deps)
 	default:
-		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, composite)", cfg.Type)
+		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, metrics, composite)", cfg.Type)
 	}
 }
 
@@ -81,8 +97,35 @@ func NewLoggerContext(cfg *ObservabilityConfig) LoggerContext {
 	}
 }
 
+// requiresMetricsDeps returns true if the config needs a MetricsFactory in
+// ObserverDeps — i.e. type is "metrics", or type is "composite" with at
+// least one metrics sub-observer.
+func requiresMetricsDeps(cfg *ObservabilityConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	if cfg.Type == "metrics" {
+		return true
+	}
+	if cfg.Type == "composite" {
+		for i := range cfg.Observers {
+			if requiresMetricsDeps(&cfg.Observers[i]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func newMetricsObserver(deps ObserverDeps) (service.ApplicationObserver, error) {
+	if deps.MetricsFactory == nil {
+		return nil, fmt.Errorf("metrics observer requires a MetricsFactory (ensure metrics are enabled and a MeterProvider is configured)")
+	}
+	return deps.MetricsFactory()
+}
+
 // newCompositeObserver creates a composite observer that delegates to multiple observers
-func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (service.ApplicationObserver, error) {
+func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext, deps ObserverDeps) (service.ApplicationObserver, error) {
 	if len(cfg.Observers) == 0 {
 		return nil, fmt.Errorf("composite observer requires at least one sub-observer")
 	}
@@ -90,7 +133,7 @@ func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (servi
 	var observers []service.ApplicationObserver
 	for i, subCfg := range cfg.Observers {
 		childLogCtx := deriveLoggerContext(logCtx, &subCfg)
-		observer, err := NewObserverWithLogger(&subCfg, childLogCtx)
+		observer, err := NewObserverWithLogger(&subCfg, childLogCtx, deps)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create observer %d: %w", i, err)
 		}
@@ -172,6 +215,12 @@ func ValidateObservabilityConfig(cfg *ObservabilityConfig) error {
 	if cfg == nil {
 		return nil
 	}
+	if err := validateObserverType("observability.type", cfg.Type); err != nil {
+		return err
+	}
+	if cfg.Type == "metrics" && (cfg.Metrics == nil || !cfg.Metrics.Enabled) {
+		return fmt.Errorf("observability type is %q but metrics.enabled is not true; set observability.metrics.enabled=true or change observability.type", cfg.Type)
+	}
 	if err := validateLogLevel("observability.log_level", cfg.LogLevel); err != nil {
 		return err
 	}
@@ -209,6 +258,15 @@ func ValidateObservabilityConfig(cfg *ObservabilityConfig) error {
 		}
 	}
 	return nil
+}
+
+func validateObserverType(field, value string) error {
+	switch strings.ToLower(value) {
+	case "", "logging", "noop", "metrics", "composite":
+		return nil
+	default:
+		return fmt.Errorf("invalid %s %q (valid: logging, noop, metrics, composite)", field, value)
+	}
 }
 
 func validateLogLevel(field, value string) error {

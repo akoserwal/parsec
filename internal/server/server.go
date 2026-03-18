@@ -48,6 +48,9 @@ type Server struct {
 	authzServer    *AuthzServer
 	exchangeServer *ExchangeServer
 	jwksServer     *JWKSServer
+
+	metricsHandler http.Handler
+	metricsPath    string
 }
 
 // Config contains server configuration. Callers must supply pre-created
@@ -67,10 +70,19 @@ type Config struct {
 
 	// Observer must be non-nil; use NoopObserver{} in tests.
 	Observer ServerLifecycleObserver
+
+	// MetricsHandler, if non-nil, is registered on the HTTP mux at MetricsPath.
+	MetricsHandler http.Handler
+	// MetricsPath is the HTTP path for the metrics endpoint. Defaults to "/metrics".
+	MetricsPath string
 }
 
 // New creates a new server with the given configuration.
 func New(cfg Config) *Server {
+	metricsPath := cfg.MetricsPath
+	if metricsPath == "" {
+		metricsPath = "/metrics"
+	}
 	return &Server{
 		grpcListener:    cfg.GRPCListener,
 		httpListener:    cfg.HTTPListener,
@@ -79,6 +91,8 @@ func New(cfg Config) *Server {
 		authzServer:     cfg.AuthzServer,
 		exchangeServer:  cfg.ExchangeServer,
 		jwksServer:      cfg.JWKSServer,
+		metricsHandler:  cfg.MetricsHandler,
+		metricsPath:     metricsPath,
 	}
 }
 
@@ -141,6 +155,9 @@ func (s *Server) Start(ctx context.Context) error {
 	httpMux := http.NewServeMux()
 	httpMux.HandleFunc("GET /healthz/live", s.handleLiveness)
 	httpMux.HandleFunc("GET /healthz/ready", s.handleReadiness)
+	if s.metricsHandler != nil {
+		httpMux.Handle("GET "+s.metricsPath, s.metricsHandler)
+	}
 	httpMux.Handle("/", gwMux)
 
 	s.httpServer = &http.Server{Handler: httpMux}

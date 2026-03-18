@@ -124,6 +124,7 @@ func newLoader(configPath string, flags *pflag.FlagSet) (*Loader, error) {
 	return &Loader{
 		k:          k,
 		configPath: configPath,
+		observer:   NoopConfigReloadObserver{},
 	}, nil
 }
 

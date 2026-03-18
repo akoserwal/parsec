@@ -202,3 +202,127 @@ func TestDeriveLoggerContext(t *testing.T) {
 			"child must share the parent's raw sink")
 	})
 }
+
+func TestValidateObservabilityConfig_Type(t *testing.T) {
+	valid := []string{"", "logging", "noop", "metrics", "composite"}
+	for _, typ := range valid {
+		t.Run("valid_"+typ, func(t *testing.T) {
+			cfg := &ObservabilityConfig{Type: typ}
+			if typ == "metrics" {
+				cfg.Metrics = &MetricsConfig{Enabled: true}
+			}
+			err := ValidateObservabilityConfig(cfg)
+			assert.NoError(t, err)
+		})
+	}
+
+	invalid := []string{"metricss", "log", "UNKNOWN", "tracing"}
+	for _, typ := range invalid {
+		t.Run("invalid_"+typ, func(t *testing.T) {
+			err := ValidateObservabilityConfig(&ObservabilityConfig{Type: typ})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid observability.type")
+			assert.Contains(t, err.Error(), typ)
+		})
+	}
+}
+
+func TestValidateObservabilityConfig_MetricsMismatch(t *testing.T) {
+	t.Run("metrics type without metrics config", func(t *testing.T) {
+		err := ValidateObservabilityConfig(&ObservabilityConfig{Type: "metrics"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "metrics.enabled is not true")
+	})
+
+	t.Run("metrics type with metrics disabled", func(t *testing.T) {
+		err := ValidateObservabilityConfig(&ObservabilityConfig{
+			Type:    "metrics",
+			Metrics: &MetricsConfig{Enabled: false},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "metrics.enabled is not true")
+	})
+
+	t.Run("metrics type with metrics enabled passes", func(t *testing.T) {
+		err := ValidateObservabilityConfig(&ObservabilityConfig{
+			Type:    "metrics",
+			Metrics: &MetricsConfig{Enabled: true},
+		})
+		assert.NoError(t, err)
+	})
+}
+
+func TestValidateObservabilityConfig_CompositeMetricsMismatch(t *testing.T) {
+	t.Run("composite with metrics sub-observer validates recursively", func(t *testing.T) {
+		err := ValidateObservabilityConfig(&ObservabilityConfig{
+			Type: "composite",
+			Observers: []ObservabilityConfig{
+				{Type: "logging"},
+				{Type: "metrics"},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "metrics.enabled is not true")
+	})
+
+	t.Run("composite with valid metrics sub-observer passes", func(t *testing.T) {
+		err := ValidateObservabilityConfig(&ObservabilityConfig{
+			Type: "composite",
+			Observers: []ObservabilityConfig{
+				{Type: "logging"},
+				{Type: "metrics", Metrics: &MetricsConfig{Enabled: true}},
+			},
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("composite without metrics sub-observer passes", func(t *testing.T) {
+		err := ValidateObservabilityConfig(&ObservabilityConfig{
+			Type: "composite",
+			Observers: []ObservabilityConfig{
+				{Type: "logging"},
+				{Type: "noop"},
+			},
+		})
+		assert.NoError(t, err)
+	})
+}
+
+func TestNewObserver_MetricsTypeReturnsError(t *testing.T) {
+	t.Run("type metrics returns clear error", func(t *testing.T) {
+		_, err := NewObserver(&ObservabilityConfig{Type: "metrics"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires metrics dependencies")
+		assert.Contains(t, err.Error(), "NewObserverWithLogger")
+	})
+
+	t.Run("composite with metrics sub-observer returns clear error", func(t *testing.T) {
+		_, err := NewObserver(&ObservabilityConfig{
+			Type: "composite",
+			Observers: []ObservabilityConfig{
+				{Type: "logging"},
+				{Type: "metrics"},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires metrics dependencies")
+	})
+
+	t.Run("type logging works without deps", func(t *testing.T) {
+		obs, err := NewObserver(&ObservabilityConfig{Type: "logging"})
+		assert.NoError(t, err)
+		assert.NotNil(t, obs)
+	})
+
+	t.Run("type noop works without deps", func(t *testing.T) {
+		obs, err := NewObserver(&ObservabilityConfig{Type: "noop"})
+		assert.NoError(t, err)
+		assert.NotNil(t, obs)
+	})
+
+	t.Run("nil config works without deps", func(t *testing.T) {
+		obs, err := NewObserver(nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, obs)
+	})
+}
