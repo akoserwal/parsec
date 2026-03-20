@@ -39,16 +39,10 @@ func WithClock(clk clock.Clock) InMemoryCachingDataSourceOption {
 	}
 }
 
-// WithCacheObserver sets the observer for cache lifecycle events.
-func WithCacheObserver(obs DataSourceCacheObserver) InMemoryCachingDataSourceOption {
-	return func(ds *InMemoryCachingDataSource) {
-		ds.observer = obs
-	}
-}
-
 // NewInMemoryCachingDataSource wraps a data source with in-memory caching if it implements Cacheable.
-// Returns the original source if it doesn't implement Cacheable.
-func NewInMemoryCachingDataSource(source service.DataSource, opts ...InMemoryCachingDataSourceOption) service.DataSource {
+// obs is required when the source is cacheable; it is used on every Fetch.
+// Returns the original source if it doesn't implement Cacheable (obs is unused in that case).
+func NewInMemoryCachingDataSource(source service.DataSource, obs DataSourceCacheObserver, opts ...InMemoryCachingDataSourceOption) service.DataSource {
 	cacheable, ok := source.(service.Cacheable)
 	if !ok {
 		return source
@@ -58,6 +52,7 @@ func NewInMemoryCachingDataSource(source service.DataSource, opts ...InMemoryCac
 		source:    source,
 		cacheable: cacheable,
 		clock:     clock.NewSystemClock(),
+		observer:  obs,
 		entries:   make(map[string]*cacheEntry),
 	}
 
@@ -75,6 +70,8 @@ func (c *InMemoryCachingDataSource) Name() string {
 
 // Fetch checks the cache first, then fetches from source on miss
 func (c *InMemoryCachingDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
+	cacheProbe := c.observer.DataSourceCacheProbe(ctx, c.source.Name())
+
 	// Get the cache key (which is the masked input with only relevant fields)
 	maskedInput := c.cacheable.CacheKey(input)
 
@@ -93,21 +90,21 @@ func (c *InMemoryCachingDataSource) Fetch(ctx context.Context, input *service.Da
 	if found {
 		// Check if entry has expired
 		if entry.expiresAt.IsZero() || c.clock.Now().Before(entry.expiresAt) {
-			c.observer.CacheHit(c.source.Name())
+			cacheProbe.CacheHit()
 			return entry.result, nil
 		}
-		c.observer.CacheExpired(c.source.Name())
+		cacheProbe.CacheExpired()
 		c.mu.Lock()
 		delete(c.entries, cacheKeyStr)
 		c.mu.Unlock()
 	}
 
-	c.observer.CacheMiss(c.source.Name())
+	cacheProbe.CacheMiss()
 
 	// Cache miss - fetch from source using the original (full) input
 	result, err := c.source.Fetch(ctx, input)
 	if err != nil {
-		c.observer.FetchFailed(c.source.Name(), err)
+		cacheProbe.FetchFailed(err)
 		return nil, err
 	}
 

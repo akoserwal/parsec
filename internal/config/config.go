@@ -350,6 +350,7 @@ type ObservabilityConfig struct {
 	AuthzCheck      *EventLoggingConfig `koanf:"authz_check"`
 	ConfigReload    *EventLoggingConfig `koanf:"config_reload"`
 	DataSourceCache *EventLoggingConfig `koanf:"datasource_cache"`
+	LuaDataSource   *EventLoggingConfig `koanf:"lua_datasource"`
 	KeyRotation     *EventLoggingConfig `koanf:"key_rotation"`
 	KeyProvider     *EventLoggingConfig `koanf:"key_provider"`
 	TrustValidation *EventLoggingConfig `koanf:"trust_validation"`

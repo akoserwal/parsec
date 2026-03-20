@@ -1,12 +1,13 @@
 package probe
 
 import (
+	"context"
+
 	"github.com/rs/zerolog"
 
 	"github.com/project-kessel/parsec/internal/datasource"
 )
 
-// Compile-time interface check.
 var _ datasource.DataSourceCacheObserver = (*LoggingDataSourceCacheObserver)(nil)
 
 // LoggingDataSourceCacheObserver logs data source cache events via zerolog.
@@ -18,18 +19,28 @@ func NewLoggingDataSourceCacheObserver(logger zerolog.Logger) *LoggingDataSource
 	return &LoggingDataSourceCacheObserver{logger: logger}
 }
 
-func (o *LoggingDataSourceCacheObserver) CacheHit(dataSourceName string) {
-	o.logger.Debug().Str("datasource", dataSourceName).Msg("cache hit")
+func (o *LoggingDataSourceCacheObserver) DataSourceCacheProbe(_ context.Context, dataSourceName string) datasource.DataSourceCacheProbe {
+	return &loggingDataSourceCacheProbe{
+		logger: o.logger.With().Str("datasource", dataSourceName).Logger(),
+	}
 }
 
-func (o *LoggingDataSourceCacheObserver) CacheMiss(dataSourceName string) {
-	o.logger.Debug().Str("datasource", dataSourceName).Msg("cache miss")
+type loggingDataSourceCacheProbe struct {
+	logger zerolog.Logger
 }
 
-func (o *LoggingDataSourceCacheObserver) CacheExpired(dataSourceName string) {
-	o.logger.Debug().Str("datasource", dataSourceName).Msg("cache entry expired")
+func (p *loggingDataSourceCacheProbe) CacheHit() {
+	p.logger.Debug().Msg("cache hit")
 }
 
-func (o *LoggingDataSourceCacheObserver) FetchFailed(dataSourceName string, err error) {
-	o.logger.Warn().Err(err).Str("datasource", dataSourceName).Msg("data source fetch failed")
+func (p *loggingDataSourceCacheProbe) CacheMiss() {
+	p.logger.Debug().Msg("cache miss")
+}
+
+func (p *loggingDataSourceCacheProbe) CacheExpired() {
+	p.logger.Debug().Msg("cache entry expired")
+}
+
+func (p *loggingDataSourceCacheProbe) FetchFailed(err error) {
+	p.logger.Warn().Err(err).Msg("data source fetch failed")
 }

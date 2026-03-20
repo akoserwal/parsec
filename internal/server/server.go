@@ -147,14 +147,15 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// All fallible setup is complete. Launch the serve goroutines last so
 	// that an early-return error never orphans a running goroutine.
+	lifecycleProbe := s.observer.ServerLifecycleProbe(ctx)
 	go func() {
 		if err := s.grpcServer.Serve(s.grpcListener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-			s.observer.GRPCServeFailed(err)
+			lifecycleProbe.GRPCServeFailed(err)
 		}
 	}()
 	go func() {
 		if err := s.httpServer.Serve(s.httpListener); err != nil && err != http.ErrServerClosed {
-			s.observer.HTTPServeFailed(err)
+			lifecycleProbe.HTTPServeFailed(err)
 		}
 	}()
 

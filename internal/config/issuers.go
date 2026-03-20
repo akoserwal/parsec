@@ -11,21 +11,17 @@ import (
 	"github.com/project-kessel/parsec/internal/issuer"
 	"github.com/project-kessel/parsec/internal/keys"
 	"github.com/project-kessel/parsec/internal/mapper"
+	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/service"
 )
 
-// IssuerRegistryConfig groups optional dependencies for NewIssuerRegistry.
-type IssuerRegistryConfig struct {
-	KeyRotationObserver keys.KeyRotationObserver
-	KeyProviderObserver keys.KeyProviderObserver
-}
-
-// NewIssuerRegistry creates an issuer registry from configuration
-func NewIssuerRegistry(cfg Config, opts IssuerRegistryConfig) (service.Registry, error) {
+// NewIssuerRegistry creates an issuer registry from configuration.
+// The observer provides key rotation and key provider lifecycle events.
+func NewIssuerRegistry(cfg Config, obs observer.Observer) (service.Registry, error) {
 	registry := service.NewSimpleRegistry()
 
 	// Build key provider registry from global config
-	providerRegistry, err := buildKeyProviderRegistry(cfg.KeyProviders, opts.KeyProviderObserver)
+	providerRegistry, err := buildKeyProviderRegistry(cfg.KeyProviders, obs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build key provider registry: %w", err)
 	}
@@ -34,7 +30,7 @@ func NewIssuerRegistry(cfg Config, opts IssuerRegistryConfig) (service.Registry,
 	slotStore := keys.NewInMemoryKeySlotStore()
 
 	// Build signer registry from global config
-	signerRegistry, err := buildSignerRegistry(cfg.Signers, cfg.TrustDomain, providerRegistry, slotStore, opts.KeyRotationObserver)
+	signerRegistry, err := buildSignerRegistry(cfg.Signers, cfg.TrustDomain, providerRegistry, slotStore, obs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build signer registry: %w", err)
 	}

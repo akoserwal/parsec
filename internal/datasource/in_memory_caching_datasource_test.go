@@ -67,8 +67,7 @@ func (m *mockNonCacheableDataSource) Fetch(ctx context.Context, input *service.D
 // NoopObserver. Callers can pass additional options (e.g. WithClock).
 func newTestCachingDataSource(t *testing.T, source service.DataSource, opts ...InMemoryCachingDataSourceOption) service.DataSource {
 	t.Helper()
-	allOpts := append([]InMemoryCachingDataSourceOption{WithCacheObserver(NoopObserver{})}, opts...)
-	return NewInMemoryCachingDataSource(source, allOpts...)
+	return NewInMemoryCachingDataSource(source, NoopObserver{}, opts...)
 }
 
 func TestInMemoryCachingDataSource(t *testing.T) {
@@ -195,7 +194,7 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 			name: "non-cacheable",
 		}
 
-		wrapped := NewInMemoryCachingDataSource(source)
+		wrapped := NewInMemoryCachingDataSource(source, NoopObserver{})
 
 		// Should return the same instance since it's not cacheable
 		if wrapped != source {
