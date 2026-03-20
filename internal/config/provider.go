@@ -4,29 +4,21 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/project-kessel/parsec/internal/datasource"
 	"github.com/project-kessel/parsec/internal/httpfixture"
-	"github.com/project-kessel/parsec/internal/keys"
+	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-// ProviderDeps groups the external dependencies injected into a Provider at
-// construction time. All observer fields must be non-nil; domain constructors
-// call observer methods unconditionally.
-type ProviderDeps struct {
-	Observer            service.ApplicationObserver
-	KeyRotationObserver keys.KeyRotationObserver
-	KeyProviderObserver keys.KeyProviderObserver
-	TrustObserver       trust.TrustValidationObserver
-	CacheObserver       datasource.DataSourceCacheObserver
-}
-
 // Provider constructs all application components from configuration.
 // Create one with NewProvider.
 type Provider struct {
 	config *Config
+
+	// Central observer — all domain constructors extract the sub-interface
+	// they need from this single value.
+	obs observer.Observer
 
 	// Lazily constructed components (cached after first call)
 	trustStore           trust.Store
@@ -36,61 +28,35 @@ type Provider struct {
 	tokenService         *service.TokenService
 	httpFixtureProvider  httpfixture.FixtureProvider
 	httpFixtureBuilt     bool
-	observer             service.ApplicationObserver
-	keyRotationObserver  keys.KeyRotationObserver
-	keyProviderObserver  keys.KeyProviderObserver
-	trustObserver        trust.TrustValidationObserver
-	cacheObserver        datasource.DataSourceCacheObserver
 }
 
-// NewProvider creates a new provider from configuration and optional deps.
-// All observer fields must be non-nil; domain constructors call observer
-// methods unconditionally. Without deps, the provider builds the application
-// observer from config on demand.
-func NewProvider(config *Config, deps ...ProviderDeps) *Provider {
-	p := &Provider{config: config}
-	if len(deps) > 0 {
-		d := deps[0]
-		p.observer = d.Observer
-		p.keyRotationObserver = d.KeyRotationObserver
-		p.keyProviderObserver = d.KeyProviderObserver
-		p.trustObserver = d.TrustObserver
-		p.cacheObserver = d.CacheObserver
-	}
-	return p
+// NewProvider creates a new provider from configuration and an observer.
+// The observer must be non-nil; domain constructors call observer methods
+// unconditionally.
+func NewProvider(config *Config, obs observer.Observer) *Provider {
+	return &Provider{config: config, obs: obs}
 }
 
-// Observer returns the configured application observer.
-// If one was provided via ProviderDeps, it is returned directly.
-// Otherwise, a default observer is built from config.
-func (p *Provider) Observer() (service.ApplicationObserver, error) {
-	if p.observer != nil {
-		return p.observer, nil
-	}
-
-	observer, err := NewObserver(p.config.Observability)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create observer: %w", err)
-	}
-
-	p.observer = observer
-	return observer, nil
+// Observer returns the central observer.
+func (p *Provider) Observer() observer.Observer {
+	return p.obs
 }
 
-// TrustStore returns the configured trust store
-func (p *Provider) TrustStore() (trust.Store, error) {
+// TrustStore returns the configured trust store.
+// Panics if the trust store cannot be constructed: the process cannot run without it.
+func (p *Provider) TrustStore() trust.Store {
 	if p.trustStore != nil {
-		return p.trustStore, nil
+		return p.trustStore
 	}
 
 	transport := p.HTTPTransport()
-	store, err := NewTrustStore(p.config.TrustStore, transport, p.trustObserver)
+	store, err := NewTrustStore(p.config.TrustStore, transport, p.obs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create trust store: %w", err)
+		panic(fmt.Sprintf("failed to create trust store: %v", err))
 	}
 
 	p.trustStore = store
-	return store, nil
+	return store
 }
 
 // DataSourceRegistry returns the configured data source registry
@@ -100,7 +66,7 @@ func (p *Provider) DataSourceRegistry() (*service.DataSourceRegistry, error) {
 	}
 
 	transport := p.HTTPTransport()
-	registry, err := NewDataSourceRegistry(p.config.DataSources, transport, p.cacheObserver)
+	registry, err := NewDataSourceRegistry(p.config.DataSources, transport, p.obs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create data source registry: %w", err)
 	}
@@ -115,10 +81,7 @@ func (p *Provider) IssuerRegistry() (service.Registry, error) {
 		return p.issuerRegistry, nil
 	}
 
-	registry, err := NewIssuerRegistry(*p.config, IssuerRegistryConfig{
-		KeyRotationObserver: p.keyRotationObserver,
-		KeyProviderObserver: p.keyProviderObserver,
-	})
+	registry, err := NewIssuerRegistry(*p.config, p.obs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create issuer registry: %w", err)
 	}
@@ -165,18 +128,11 @@ func (p *Provider) TokenService() (*service.TokenService, error) {
 		return nil, err
 	}
 
-	// Get observer
-	observer, err := p.Observer()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get observer: %w", err)
-	}
-
-	// Create token service
 	tokenService := service.NewTokenService(
 		p.config.TrustDomain,
 		dataSourceRegistry,
 		issuerRegistry,
-		observer, // Application observer for observability
+		p.obs,
 	)
 
 	p.tokenService = tokenService

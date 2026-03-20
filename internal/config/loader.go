@@ -14,6 +14,7 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/posflag"
 	"github.com/knadh/koanf/v2"
+	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
 )
 
@@ -22,7 +23,8 @@ import (
 type Loader struct {
 	k          *koanf.Koanf
 	configPath string
-	observer   ConfigReloadObserver
+	// reloadLog receives errors from Watch when a reload fails (defaults to Nop).
+	reloadLog zerolog.Logger
 }
 
 // NewLoader creates a new configuration loader that reads from a file
@@ -124,12 +126,20 @@ func newLoader(configPath string, flags *pflag.FlagSet) (*Loader, error) {
 	return &Loader{
 		k:          k,
 		configPath: configPath,
+		reloadLog:  zerolog.Nop(),
 	}, nil
 }
 
-// SetObserver sets the observer for config reload events.
-func (l *Loader) SetObserver(observer ConfigReloadObserver) {
-	l.observer = observer
+// SetReloadLogger sets the logger used when Loader.Watch fails to reload the file.
+// Call after the first successful Get() so observability.config_reload can be applied, e.g.:
+//
+//	loader.SetReloadLogger(EventLogger(logCtx, "config_reload", cfg.Observability.ConfigReload))
+func (l *Loader) SetReloadLogger(log zerolog.Logger) {
+	l.reloadLog = log
+}
+
+func (l *Loader) logReloadFailed(step string, err error) {
+	l.reloadLog.Error().Err(err).Str("step", step).Msg("config reload failed")
 }
 
 // Get unmarshals the configuration into a Config struct
@@ -159,23 +169,23 @@ func (l *Loader) Watch(ctx context.Context, onChange func(*Config) error) error 
 	// Set up file watcher
 	if err := fp.Watch(func(event interface{}, err error) {
 		if err != nil {
-			l.observer.ConfigReloadFailed("watch", err)
+			l.logReloadFailed("watch", err)
 			return
 		}
 
 		parser, err := getParserForFile(l.configPath)
 		if err != nil {
-			l.observer.ConfigReloadFailed("parser", err)
+			l.logReloadFailed("parser", err)
 			return
 		}
 
 		k := koanf.New(".")
 		if err := k.Load(confmap.Provider(getDefaults(), "."), nil); err != nil {
-			l.observer.ConfigReloadFailed("defaults", err)
+			l.logReloadFailed("defaults", err)
 			return
 		}
 		if err := k.Load(fp, parser); err != nil {
-			l.observer.ConfigReloadFailed("reload", err)
+			l.logReloadFailed("reload", err)
 			return
 		}
 
@@ -185,20 +195,20 @@ func (l *Loader) Watch(ctx context.Context, onChange func(*Config) error) error 
 				return envTransform(k), v
 			},
 		}), nil); err != nil {
-			l.observer.ConfigReloadFailed("env", err)
+			l.logReloadFailed("env", err)
 			return
 		}
 
 		var cfg Config
 		if err := k.Unmarshal("", &cfg); err != nil {
-			l.observer.ConfigReloadFailed("unmarshal", err)
+			l.logReloadFailed("unmarshal", err)
 			return
 		}
 
 		l.k = k
 
 		if err := onChange(&cfg); err != nil {
-			l.observer.ConfigReloadFailed("onChange", err)
+			l.logReloadFailed("onChange", err)
 		}
 	}); err != nil {
 		return fmt.Errorf("failed to watch config file: %w", err)

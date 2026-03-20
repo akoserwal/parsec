@@ -8,15 +8,17 @@ import (
 
 	"github.com/project-kessel/parsec/internal/datasource"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
+	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/service"
 )
 
-// NewDataSourceRegistry creates a data source registry from configuration
-func NewDataSourceRegistry(cfg []DataSourceConfig, transport http.RoundTripper, cacheObs datasource.DataSourceCacheObserver) (*service.DataSourceRegistry, error) {
+// NewDataSourceRegistry creates a data source registry from configuration.
+// The observer provides cache lifecycle events for data sources that use caching.
+func NewDataSourceRegistry(cfg []DataSourceConfig, transport http.RoundTripper, obs observer.Observer) (*service.DataSourceRegistry, error) {
 	registry := service.NewDataSourceRegistry()
 
 	for _, dsCfg := range cfg {
-		ds, err := newDataSource(dsCfg, transport, cacheObs)
+		ds, err := newDataSource(dsCfg, transport, obs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create data source %s: %w", dsCfg.Name, err)
 		}
@@ -26,18 +28,16 @@ func NewDataSourceRegistry(cfg []DataSourceConfig, transport http.RoundTripper, 
 	return registry, nil
 }
 
-// newDataSource creates a data source from configuration
-func newDataSource(cfg DataSourceConfig, transport http.RoundTripper, cacheObs datasource.DataSourceCacheObserver) (service.DataSource, error) {
+func newDataSource(cfg DataSourceConfig, transport http.RoundTripper, obs observer.Observer) (service.DataSource, error) {
 	switch cfg.Type {
 	case "lua":
-		return newLuaDataSource(cfg, transport, cacheObs)
+		return newLuaDataSource(cfg, transport, obs)
 	default:
 		return nil, fmt.Errorf("unknown data source type: %s (supported: lua)", cfg.Type)
 	}
 }
 
-// newLuaDataSource creates a Lua data source with optional caching
-func newLuaDataSource(cfg DataSourceConfig, transport http.RoundTripper, cacheObs datasource.DataSourceCacheObserver) (service.DataSource, error) {
+func newLuaDataSource(cfg DataSourceConfig, transport http.RoundTripper, obs observer.Observer) (service.DataSource, error) {
 	if cfg.Name == "" {
 		return nil, fmt.Errorf("data source name is required")
 	}
@@ -78,6 +78,7 @@ func newLuaDataSource(cfg DataSourceConfig, transport http.RoundTripper, cacheOb
 		Script:       script,
 		ConfigSource: configSource,
 		HTTPConfig:   httpConfig,
+		Observer:     obs,
 	}
 
 	baseDS, err := datasource.NewLuaDataSource(luaDSConfig)
@@ -85,9 +86,8 @@ func newLuaDataSource(cfg DataSourceConfig, transport http.RoundTripper, cacheOb
 		return nil, fmt.Errorf("failed to create lua data source: %w", err)
 	}
 
-	// Wrap with caching if configured
 	if cfg.Caching != nil {
-		return wrapWithCaching(baseDS, *cfg.Caching, cacheObs)
+		return wrapWithCaching(baseDS, *cfg.Caching, obs)
 	}
 
 	return baseDS, nil
@@ -116,11 +116,13 @@ func buildHTTPConfig(cfg *HTTPConfig, transport http.RoundTripper) (*luaservices
 	return httpServiceCfg, nil
 }
 
-// wrapWithCaching wraps a data source with the configured caching layer
-func wrapWithCaching(ds service.DataSource, cfg CachingConfig, cacheObs datasource.DataSourceCacheObserver) (service.DataSource, error) {
+// wrapWithCaching wraps a data source with the configured caching layer.
+// This is the coupling point where the central observer is narrowed to
+// the cache-specific DataSourceCacheObserver sub-interface.
+func wrapWithCaching(ds service.DataSource, cfg CachingConfig, obs observer.Observer) (service.DataSource, error) {
 	switch cfg.Type {
 	case "in_memory":
-		return datasource.NewInMemoryCachingDataSource(ds, datasource.WithCacheObserver(cacheObs)), nil
+		return datasource.NewInMemoryCachingDataSource(ds, obs), nil
 
 	case "distributed":
 		groupName := cfg.GroupName

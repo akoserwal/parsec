@@ -103,6 +103,7 @@ func (s *FilteredStore) AddValidator(name string, v Validator) *FilteredStore {
 // Validate implements the Store interface
 // Tries validators in order until one succeeds
 func (s *FilteredStore) Validate(ctx context.Context, credential Credential) (*Result, error) {
+	p := s.observer.TrustValidationProbe(ctx)
 	credType := credential.Type()
 
 	// Look up validators for this credential type
@@ -119,12 +120,12 @@ func (s *FilteredStore) Validate(ctx context.Context, credential Credential) (*R
 			return result, nil
 		}
 
-		s.observer.ValidatorFailed(nv.Name, credType, err)
+		p.ValidatorFailed(nv.Name, credType, err)
 		errs = append(errs, err)
 	}
 
 	lastErr := errs[len(errs)-1]
-	s.observer.AllValidatorsFailed(credType, len(errs), lastErr)
+	p.AllValidatorsFailed(credType, len(errs), lastErr)
 	return nil, fmt.Errorf("all validators failed for credential type %s: %w", credType, lastErr)
 }
 
@@ -141,6 +142,8 @@ func (s *FilteredStore) ForActor(ctx context.Context, actor *Result, requestAttr
 		return s, nil
 	}
 
+	p := s.observer.TrustValidationProbe(ctx)
+
 	// Create a new filtered store inheriting filter and observer
 	filtered := &FilteredStore{
 		validatorsByType: make(map[CredentialType][]NamedValidator),
@@ -153,14 +156,14 @@ func (s *FilteredStore) ForActor(ctx context.Context, actor *Result, requestAttr
 	for _, nv := range s.validators {
 		allowed, err := s.filter.IsAllowed(actor, nv.Name, requestAttrs)
 		if err != nil {
-			s.observer.FilterEvaluationFailed(nv.Name, err)
+			p.FilterEvaluationFailed(nv.Name, err)
 			return nil, fmt.Errorf("failed to evaluate filter for validator %s: %w", nv.Name, err)
 		}
 
 		if allowed {
 			filtered.AddValidator(nv.Name, nv.Validator)
 		} else {
-			s.observer.ValidatorFiltered(nv.Name, actor.Subject)
+			p.ValidatorFiltered(nv.Name, actor.Subject)
 		}
 	}
 

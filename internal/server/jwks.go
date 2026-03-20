@@ -71,15 +71,17 @@ func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 // Start begins the background cache refresh
 func (s *JWKSServer) Start(ctx context.Context) error {
 	// Populate cache immediately
-	if err := s.refreshCache(ctx); err != nil {
-		s.observer.InitialCachePopulationFailed(err)
+	initProbe := s.observer.JWKSCacheProbe(ctx)
+	if err := s.refreshCache(ctx, initProbe); err != nil {
+		initProbe.InitialCachePopulationFailed(err)
 	}
 
 	// Start background refresh
 	s.ticker = s.clock.Ticker(s.refreshInterval)
 	return s.ticker.Start(func(ctx context.Context) {
-		if err := s.refreshCache(ctx); err != nil {
-			s.observer.CacheRefreshFailed(err)
+		bgProbe := s.observer.JWKSCacheProbe(ctx)
+		if err := s.refreshCache(ctx, bgProbe); err != nil {
+			bgProbe.CacheRefreshFailed(err)
 		}
 	})
 }
@@ -112,12 +114,12 @@ func (s *JWKSServer) GetJWKS(ctx context.Context, req *parsecv1.GetJWKSRequest) 
 
 	// Cache is empty (first request or failed initial population)
 	// Build the response synchronously to ensure immediate availability
-	return s.buildJWKSResponse(ctx)
+	return s.buildJWKSResponse(ctx, s.observer.JWKSCacheProbe(ctx))
 }
 
 // refreshCache updates the cached JWKS response in the background
-func (s *JWKSServer) refreshCache(ctx context.Context) error {
-	resp, err := s.buildJWKSResponse(ctx)
+func (s *JWKSServer) refreshCache(ctx context.Context, p JWKSCacheProbe) error {
+	resp, err := s.buildJWKSResponse(ctx, p)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -137,7 +139,7 @@ func (s *JWKSServer) refreshCache(ctx context.Context) error {
 }
 
 // buildJWKSResponse builds a fresh JWKS response from all issuers
-func (s *JWKSServer) buildJWKSResponse(ctx context.Context) (*parsecv1.GetJWKSResponse, error) {
+func (s *JWKSServer) buildJWKSResponse(ctx context.Context, p JWKSCacheProbe) (*parsecv1.GetJWKSResponse, error) {
 	// Get all public keys from all issuers at once
 	publicKeys, err := s.issuerRegistry.GetAllPublicKeys(ctx)
 
@@ -155,7 +157,7 @@ func (s *JWKSServer) buildJWKSResponse(ctx context.Context) (*parsecv1.GetJWKSRe
 	for _, pk := range publicKeys {
 		jwk, err := convertToJSONWebKey(pk)
 		if err != nil {
-			s.observer.KeyConversionFailed(pk.KeyID, err)
+			p.KeyConversionFailed(pk.KeyID, err)
 			continue
 		}
 		allKeys = append(allKeys, jwk)

@@ -1,6 +1,8 @@
 package probe
 
 import (
+	"context"
+
 	"github.com/rs/zerolog"
 
 	"github.com/project-kessel/parsec/internal/server"
@@ -17,10 +19,18 @@ func NewLoggingServerLifecycleObserver(logger zerolog.Logger) *LoggingServerLife
 	return &LoggingServerLifecycleObserver{logger: logger}
 }
 
-func (o *LoggingServerLifecycleObserver) GRPCServeFailed(err error) {
-	o.logger.Error().Err(err).Msg("gRPC server error")
+func (o *LoggingServerLifecycleObserver) ServerLifecycleProbe(_ context.Context) server.ServerLifecycleProbe {
+	return &loggingServerLifecycleProbe{logger: o.logger}
 }
 
-func (o *LoggingServerLifecycleObserver) HTTPServeFailed(err error) {
-	o.logger.Error().Err(err).Msg("HTTP server error")
+type loggingServerLifecycleProbe struct {
+	logger zerolog.Logger
+}
+
+func (p *loggingServerLifecycleProbe) GRPCServeFailed(err error) {
+	p.logger.Error().Err(err).Msg("gRPC server error")
+}
+
+func (p *loggingServerLifecycleProbe) HTTPServeFailed(err error) {
+	p.logger.Error().Err(err).Msg("HTTP server error")
 }

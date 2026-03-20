@@ -2,7 +2,10 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -11,6 +14,85 @@ import (
 )
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestNewObserverWithLogger_NilConfig_ReturnsNoop(t *testing.T) {
+	obs, err := NewObserverWithLogger(nil, LoggerContext{})
+	require.NoError(t, err)
+	require.NotNil(t, obs)
+
+	ctx := context.Background()
+	p := obs.DataSourceCacheProbe(ctx, "ds")
+	p.CacheHit()
+}
+
+func TestNewObserverWithLogger_NoopType(t *testing.T) {
+	for _, typ := range []string{"noop", ""} {
+		t.Run("type="+typ, func(t *testing.T) {
+			obs, err := NewObserverWithLogger(&ObservabilityConfig{Type: typ}, LoggerContext{})
+			require.NoError(t, err)
+			require.NotNil(t, obs)
+
+			ctx := context.Background()
+			obs.KeyRotationProbe(ctx).RotationCompleted("slot")
+		})
+	}
+}
+
+func TestNewObserverWithLogger_LoggingType(t *testing.T) {
+	var buf bytes.Buffer
+	logCtx := jsonLogCtx(&buf)
+
+	obs, err := NewObserverWithLogger(&ObservabilityConfig{Type: "logging"}, logCtx)
+	require.NoError(t, err)
+	require.NotNil(t, obs)
+
+	ctx := context.Background()
+	p := obs.DataSourceCacheProbe(ctx, "test-ds")
+	p.FetchFailed(errors.New("timeout"))
+
+	assert.Contains(t, buf.String(), "data source fetch failed")
+	assert.Contains(t, buf.String(), `"datasource":"test-ds"`)
+}
+
+func TestNewObserverWithLogger_CompositeType(t *testing.T) {
+	var buf bytes.Buffer
+	logCtx := jsonLogCtx(&buf)
+
+	obs, err := NewObserverWithLogger(&ObservabilityConfig{
+		Type: "composite",
+		Observers: []ObservabilityConfig{
+			{Type: "logging"},
+			{Type: "logging"},
+		},
+	}, logCtx)
+	require.NoError(t, err)
+	require.NotNil(t, obs)
+
+	ctx := context.Background()
+	p := obs.ServerLifecycleProbe(ctx)
+	p.GRPCServeFailed(errors.New("bind error"))
+
+	output := buf.String()
+	// Two logging children means the message should appear twice
+	first := strings.Index(output, "gRPC server error")
+	require.NotEqual(t, -1, first, "expected at least one gRPC server error log")
+	second := strings.Index(output[first+1:], "gRPC server error")
+	assert.NotEqual(t, -1, second, "composite with 2 logging children should log twice")
+}
+
+func TestNewObserverWithLogger_CompositeEmpty_ReturnsError(t *testing.T) {
+	_, err := NewObserverWithLogger(&ObservabilityConfig{
+		Type:      "composite",
+		Observers: nil,
+	}, LoggerContext{})
+	assert.Error(t, err)
+}
+
+func TestNewObserverWithLogger_UnknownType_ReturnsError(t *testing.T) {
+	_, err := NewObserverWithLogger(&ObservabilityConfig{Type: "prometheus"}, LoggerContext{})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown observability type")
+}
 
 // jsonLogCtx builds a LoggerContext that writes JSON to buf.
 // Writer is set to the raw buf so format overrides work correctly.

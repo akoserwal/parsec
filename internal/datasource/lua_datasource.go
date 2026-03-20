@@ -20,6 +20,7 @@ type LuaDataSource struct {
 	script       string
 	configSource luaservices.ConfigSource
 	httpConfig   luaservices.HTTPServiceConfig
+	observer     LuaDataSourceObserver
 }
 
 // LuaDataSourceConfig configures a Lua data source
@@ -48,6 +49,9 @@ type LuaDataSourceConfig struct {
 	// HTTPConfig provides HTTP service configuration including timeout, fixtures, etc.
 	// If nil, default HTTP config (30s timeout, no fixtures) will be used
 	HTTPConfig *luaservices.HTTPServiceConfig
+
+	// Observer for Lua-specific execution events. Must be non-nil.
+	Observer LuaDataSourceObserver
 }
 
 // NewLuaDataSource creates a new Lua data source
@@ -87,11 +91,17 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 		}
 	}
 
+	obs := config.Observer
+	if obs == nil {
+		obs = NoopObserver{}
+	}
+
 	return &LuaDataSource{
 		name:         config.Name,
 		script:       config.Script,
 		configSource: config.ConfigSource,
 		httpConfig:   httpConfig,
+		observer:     obs,
 	}, nil
 }
 
@@ -102,11 +112,11 @@ func (ds *LuaDataSource) Name() string {
 
 // Fetch executes the Lua script to fetch data
 func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
-	// Create a new Lua state for this request
+	p := ds.observer.LuaDataSourceProbe(ctx, ds.name)
+
 	L := lua.NewState()
 	defer L.Close()
 
-	// Register services
 	httpService := luaservices.NewHTTPServiceWithConfig(ds.httpConfig)
 	httpService.Register(L)
 
@@ -116,40 +126,42 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 	jsonService := luaservices.NewJSONService()
 	jsonService.Register(L)
 
-	// Load the script
 	if err := L.DoString(ds.script); err != nil {
+		p.ScriptLoadFailed(err)
 		return nil, fmt.Errorf("failed to load script: %w", err)
 	}
 
-	// Convert input to Lua table
 	inputTable := ds.inputToLuaTable(L, input)
 
-	// Call the fetch function
 	fetchFunc := L.GetGlobal("fetch")
 	if err := L.CallByParam(lua.P{
 		Fn:      fetchFunc,
 		NRet:    1,
 		Protect: true,
 	}, inputTable); err != nil {
+		p.ScriptExecutionFailed(err)
 		return nil, fmt.Errorf("script execution failed: %w", err)
 	}
 
-	// Get the result
 	ret := L.Get(-1)
 	L.Pop(1)
 
-	// Handle nil result (data source has nothing to contribute)
 	if ret.Type() == lua.LTNil {
+		p.FetchCompleted()
 		return nil, nil
 	}
 
-	// Convert result to DataSourceResult
 	if ret.Type() != lua.LTTable {
+		p.InvalidReturnType(ret.Type().String())
 		return nil, fmt.Errorf("fetch function must return a table or nil, got %s", ret.Type())
 	}
 
-	resultTable := ret.(*lua.LTable)
-	return ds.luaTableToResult(resultTable)
+	result, err := ds.luaTableToResult(ret.(*lua.LTable))
+	if err != nil {
+		return nil, err
+	}
+	p.FetchCompleted()
+	return result, nil
 }
 
 // inputToLuaTable converts a DataSourceInput to a Lua table

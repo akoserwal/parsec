@@ -1,25 +1,57 @@
 package datasource
 
-// DataSourceCacheObserver receives cache lifecycle events from InMemoryCachingDataSource.
+import "context"
+
+// DataSourceCacheObserver creates request-scoped probes for cache lifecycle events.
 type DataSourceCacheObserver interface {
-	// CacheHit is called when a fetch is served from cache.
-	CacheHit(dataSourceName string)
-
-	// CacheMiss is called when a cache miss triggers a fetch from the underlying source.
-	CacheMiss(dataSourceName string)
-
-	// CacheExpired is called when a cache entry is found but has expired.
-	CacheExpired(dataSourceName string)
-
-	// FetchFailed is called when the underlying data source fetch fails on a cache miss.
-	FetchFailed(dataSourceName string, err error)
+	DataSourceCacheProbe(ctx context.Context, dataSourceName string) DataSourceCacheProbe
 }
 
-// NoopObserver satisfies DataSourceCacheObserver with empty methods.
-// Useful in tests that don't care about observer events.
+// DataSourceCacheProbe logs or records cache events for a single data source
+// without repeating the data source name on every call.
+type DataSourceCacheProbe interface {
+	CacheHit()
+	CacheMiss()
+	CacheExpired()
+	FetchFailed(err error)
+}
+
+// LuaDataSourceObserver creates probes for Lua script execution events.
+type LuaDataSourceObserver interface {
+	LuaDataSourceProbe(ctx context.Context, dataSourceName string) LuaDataSourceProbe
+}
+
+// LuaDataSourceProbe receives Lua-specific execution events for one Fetch call.
+type LuaDataSourceProbe interface {
+	ScriptLoadFailed(err error)
+	ScriptExecutionFailed(err error)
+	InvalidReturnType(got string)
+	FetchCompleted()
+}
+
+// --- noop implementations ---
+
+type noopDataSourceCacheProbe struct{}
+
+func (noopDataSourceCacheProbe) CacheHit()         {}
+func (noopDataSourceCacheProbe) CacheMiss()        {}
+func (noopDataSourceCacheProbe) CacheExpired()     {}
+func (noopDataSourceCacheProbe) FetchFailed(error) {}
+
+type noopLuaDataSourceProbe struct{}
+
+func (noopLuaDataSourceProbe) ScriptLoadFailed(error)      {}
+func (noopLuaDataSourceProbe) ScriptExecutionFailed(error) {}
+func (noopLuaDataSourceProbe) InvalidReturnType(string)    {}
+func (noopLuaDataSourceProbe) FetchCompleted()             {}
+
+// NoopObserver satisfies both datasource observer interfaces with empty probes.
 type NoopObserver struct{}
 
-func (NoopObserver) CacheHit(string)           {}
-func (NoopObserver) CacheMiss(string)          {}
-func (NoopObserver) CacheExpired(string)       {}
-func (NoopObserver) FetchFailed(string, error) {}
+func (NoopObserver) DataSourceCacheProbe(context.Context, string) DataSourceCacheProbe {
+	return noopDataSourceCacheProbe{}
+}
+
+func (NoopObserver) LuaDataSourceProbe(context.Context, string) LuaDataSourceProbe {
+	return noopLuaDataSourceProbe{}
+}

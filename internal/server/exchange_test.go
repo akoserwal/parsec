@@ -723,6 +723,137 @@ func NewAllowListClaimsFilterRegistry(allowedClaims []string) *AllowListClaimsFi
 	}
 }
 
+func TestExchangeServer_Exchange_Observability(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("successful exchange calls probe methods in correct order", func(t *testing.T) {
+		fakeObs := service.NewFakeObserver(t)
+
+		store := trust.NewStubStore()
+		stubValidator := trust.NewStubValidator(trust.CredentialTypeBearer)
+		stubValidator.WithResult(&trust.Result{
+			Subject:     "user-123",
+			TrustDomain: "parsec.test",
+		})
+		store.AddValidator(stubValidator)
+
+		dataSourceRegistry := service.NewDataSourceRegistry()
+		issuerRegistry := service.NewSimpleRegistry()
+		txnMappers := []service.ClaimMapper{service.NewPassthroughSubjectMapper()}
+		reqMappers := []service.ClaimMapper{service.NewRequestAttributesMapper()}
+		txnTokenIssuer := issuer.NewStubIssuer(issuer.StubIssuerConfig{
+			IssuerURL:                 "https://parsec.test",
+			TTL:                       5 * time.Minute,
+			TransactionContextMappers: txnMappers,
+			RequestContextMappers:     reqMappers,
+		})
+		issuerRegistry.Register(service.TokenTypeTransactionToken, txnTokenIssuer)
+		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
+
+		claimsFilterRegistry := NewStubClaimsFilterRegistry()
+		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, fakeObs)
+
+		req := &parsecv1.ExchangeRequest{
+			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
+			SubjectToken: "valid-token",
+			Audience:     "parsec.test",
+		}
+
+		resp, err := exchangeServer.Exchange(ctx, req)
+		if err != nil {
+			t.Fatalf("Exchange failed: %v", err)
+		}
+		if resp.AccessToken == "" {
+			t.Fatal("expected non-empty access token")
+		}
+
+		p := fakeObs.AssertSingleProbe("TokenExchangeStarted", map[string]any{
+			"grantType": "urn:ietf:params:oauth:grant-type:token-exchange",
+			"audience":  "parsec.test",
+		})
+		p.AssertProbeSequence(
+			"ActorValidationSucceeded",
+			"RequestContextParsed",
+			"SubjectTokenValidationSucceeded",
+			"End",
+		)
+	})
+
+	t.Run("actor validation failure calls probe correctly", func(t *testing.T) {
+		fakeObs := service.NewFakeObserver(t)
+
+		store := trust.NewStubStore()
+		// JWT-only validator — Bearer credential will fail validation
+		jwtValidator := trust.NewStubValidator(trust.CredentialTypeJWT)
+		jwtValidator.WithResult(&trust.Result{Subject: "jwt-user"})
+		store.AddValidator(jwtValidator)
+
+		dataSourceRegistry := service.NewDataSourceRegistry()
+		issuerRegistry := service.NewSimpleRegistry()
+		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
+
+		claimsFilterRegistry := NewStubClaimsFilterRegistry()
+		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, fakeObs)
+
+		md := metadata.New(map[string]string{
+			"authorization": "Bearer invalid-actor-token",
+		})
+		actorCtx := metadata.NewIncomingContext(ctx, md)
+
+		req := &parsecv1.ExchangeRequest{
+			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
+			SubjectToken: "subject-token",
+			Audience:     "parsec.test",
+		}
+
+		_, err := exchangeServer.Exchange(actorCtx, req)
+		if err == nil {
+			t.Fatal("expected error for actor validation failure")
+		}
+
+		p := fakeObs.AssertSingleProbe("TokenExchangeStarted", nil)
+		p.AssertProbeSequence(
+			"ActorValidationFailed",
+			"End",
+		)
+	})
+
+	t.Run("invalid request_context calls RequestContextParseFailed", func(t *testing.T) {
+		fakeObs := service.NewFakeObserver(t)
+
+		store := trust.NewStubStore()
+		stubValidator := trust.NewStubValidator(trust.CredentialTypeBearer)
+		stubValidator.WithResult(&trust.Result{Subject: "user-1", TrustDomain: "parsec.test"})
+		store.AddValidator(stubValidator)
+
+		dataSourceRegistry := service.NewDataSourceRegistry()
+		issuerRegistry := service.NewSimpleRegistry()
+		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
+
+		claimsFilterRegistry := NewStubClaimsFilterRegistry()
+		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, fakeObs)
+
+		req := &parsecv1.ExchangeRequest{
+			GrantType:      "urn:ietf:params:oauth:grant-type:token-exchange",
+			SubjectToken:   "token",
+			Audience:       "parsec.test",
+			RequestContext: "not-valid-base64!@#$",
+		}
+
+		_, err := exchangeServer.Exchange(ctx, req)
+		if err == nil {
+			t.Fatal("expected error for invalid request_context")
+		}
+
+		p := fakeObs.AssertSingleProbe("TokenExchangeStarted", nil)
+		p.AssertProbeSequence(
+			"ActorValidationSucceeded",
+			"RequestContextParseFailed",
+			"End",
+		)
+	})
+}
+
 // parseTestTokenRequestContext extracts the request context from a stub token
 // Format: stub-txn-token.{subject}.{txnID}.{requestContextJSON}
 func parseTestTokenRequestContext(token string) (map[string]any, error) {
