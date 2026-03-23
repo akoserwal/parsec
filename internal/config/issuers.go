@@ -63,7 +63,7 @@ func NewIssuerRegistry(cfg Config, obs observer.Observer) (service.Registry, err
 }
 
 // buildKeyProviderRegistry creates a map of KeyProvider instances from configuration
-func buildKeyProviderRegistry(configs []KeyProviderConfig, providerObs keys.KeyProviderObserver) (map[string]keys.KeyProvider, error) {
+func buildKeyProviderRegistry(configs []KeyProviderConfig, providerObs keys.ProviderObserver) (map[string]keys.KeyProvider, error) {
 	registry := make(map[string]keys.KeyProvider)
 
 	for _, cfg := range configs {
@@ -130,7 +130,7 @@ func buildKeyProviderRegistry(configs []KeyProviderConfig, providerObs keys.KeyP
 }
 
 // buildSignerRegistry creates a SignerRegistry from configuration
-func buildSignerRegistry(configs []SignerConfig, trustDomain string, providerRegistry map[string]keys.KeyProvider, slotStore keys.KeySlotStore, rotObs keys.KeyRotationObserver) (*keys.SignerRegistry, error) {
+func buildSignerRegistry(configs []SignerConfig, trustDomain string, providerRegistry map[string]keys.KeyProvider, slotStore keys.KeySlotStore, rotObs keys.RotationObserver) (*keys.SignerRegistry, error) {
 	registry := keys.NewSignerRegistry()
 
 	for _, cfg := range configs {

@@ -31,7 +31,7 @@ type FilteredStore struct {
 	validators []NamedValidator
 	// Filter for determining validator access
 	filter   ValidatorFilter
-	observer TrustValidationObserver
+	observer ValidationObserver
 }
 
 // FilteredStoreOption is a functional option for configuring a FilteredStore
@@ -45,8 +45,8 @@ func WithValidatorFilter(filter ValidatorFilter) FilteredStoreOption {
 	}
 }
 
-// WithTrustValidationObserver sets the observer for trust validation events.
-func WithTrustValidationObserver(obs TrustValidationObserver) FilteredStoreOption {
+// WithValidationObserver sets the observer for trust validation events.
+func WithValidationObserver(obs ValidationObserver) FilteredStoreOption {
 	return func(s *FilteredStore) error {
 		s.observer = obs
 		return nil
@@ -82,6 +82,10 @@ func NewFilteredStore(opts ...FilteredStoreOption) (*FilteredStore, error) {
 		}
 	}
 
+	if s.observer == nil {
+		s.observer = NoOpObserver{}
+	}
+
 	return s, nil
 }
 
@@ -103,7 +107,8 @@ func (s *FilteredStore) AddValidator(name string, v Validator) *FilteredStore {
 // Validate implements the Store interface
 // Tries validators in order until one succeeds
 func (s *FilteredStore) Validate(ctx context.Context, credential Credential) (*Result, error) {
-	p := s.observer.TrustValidationProbe(ctx)
+	ctx, p := s.observer.ValidationStarted(ctx)
+	defer p.End()
 	credType := credential.Type()
 
 	// Look up validators for this credential type
@@ -142,7 +147,8 @@ func (s *FilteredStore) ForActor(ctx context.Context, actor *Result, requestAttr
 		return s, nil
 	}
 
-	p := s.observer.TrustValidationProbe(ctx)
+	_, p := s.observer.ValidationStarted(ctx)
+	defer p.End()
 
 	// Create a new filtered store inheriting filter and observer
 	filtered := &FilteredStore{

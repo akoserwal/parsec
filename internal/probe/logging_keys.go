@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -9,8 +10,8 @@ import (
 )
 
 var (
-	_ keys.KeyRotationObserver = (*LoggingKeyRotationObserver)(nil)
-	_ keys.KeyProviderObserver = (*LoggingKeyProviderObserver)(nil)
+	_ keys.RotationObserver = (*LoggingKeyRotationObserver)(nil)
+	_ keys.ProviderObserver = (*LoggingKeyProviderObserver)(nil)
 )
 
 // LoggingKeyRotationObserver logs key rotation lifecycle events via zerolog.
@@ -22,48 +23,59 @@ func NewLoggingKeyRotationObserver(logger zerolog.Logger) *LoggingKeyRotationObs
 	return &LoggingKeyRotationObserver{logger: logger}
 }
 
-func (o *LoggingKeyRotationObserver) KeyRotationProbe(_ context.Context) keys.KeyRotationProbe {
-	return &loggingKeyRotationProbe{logger: o.logger}
+func (o *LoggingKeyRotationObserver) RotationCheckStarted(ctx context.Context) (context.Context, keys.RotationCheckProbe) {
+	return ctx, &loggingRotationCheckProbe{
+		logger:    o.logger,
+		startTime: time.Now(),
+	}
 }
 
-type loggingKeyRotationProbe struct {
-	logger zerolog.Logger
+type loggingRotationCheckProbe struct {
+	keys.NoOpRotationCheckProbe
+	logger    zerolog.Logger
+	startTime time.Time
 }
 
-func (p *loggingKeyRotationProbe) RotationCheckFailed(err error) {
+func (p *loggingRotationCheckProbe) RotationCheckFailed(err error) {
 	p.logger.Error().Err(err).Msg("key rotation check failed")
 }
 
-func (p *loggingKeyRotationProbe) ActiveKeyCacheUpdateFailed(err error) {
+func (p *loggingRotationCheckProbe) ActiveKeyCacheUpdateFailed(err error) {
 	p.logger.Error().Err(err).Msg("active key cache update failed")
 }
 
-func (p *loggingKeyRotationProbe) RotationCompleted(slot string) {
+func (p *loggingRotationCheckProbe) RotationCompleted(slot string) {
 	p.logger.Info().Str("slot", slot).Msg("key rotation completed")
 }
 
-func (p *loggingKeyRotationProbe) RotationSkippedVersionRace(slot string) {
+func (p *loggingRotationCheckProbe) RotationSkippedVersionRace(slot string) {
 	p.logger.Info().Str("slot", slot).Msg("another process completed rotation, skipping")
 }
 
-func (p *loggingKeyRotationProbe) KeyProviderNotFound(provider, slot string) {
+func (p *loggingRotationCheckProbe) KeyProviderNotFound(provider, slot string) {
 	p.logger.Warn().Str("provider", provider).Str("slot", slot).Msg("key provider not found, skipping")
 }
 
-func (p *loggingKeyRotationProbe) KeyHandleFailed(slot string, err error) {
+func (p *loggingRotationCheckProbe) KeyHandleFailed(slot string, err error) {
 	p.logger.Warn().Err(err).Str("slot", slot).Msg("failed to get key handle")
 }
 
-func (p *loggingKeyRotationProbe) PublicKeyFailed(slot string, err error) {
+func (p *loggingRotationCheckProbe) PublicKeyFailed(slot string, err error) {
 	p.logger.Warn().Err(err).Str("slot", slot).Msg("failed to get public key")
 }
 
-func (p *loggingKeyRotationProbe) ThumbprintFailed(slot string, err error) {
+func (p *loggingRotationCheckProbe) ThumbprintFailed(slot string, err error) {
 	p.logger.Warn().Err(err).Str("slot", slot).Msg("failed to compute thumbprint")
 }
 
-func (p *loggingKeyRotationProbe) MetadataFailed(slot string, err error) {
+func (p *loggingRotationCheckProbe) MetadataFailed(slot string, err error) {
 	p.logger.Warn().Err(err).Str("slot", slot).Msg("failed to get key metadata")
+}
+
+func (p *loggingRotationCheckProbe) End() {
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("rotation check completed")
 }
 
 // LoggingKeyProviderObserver logs key provider lifecycle events via zerolog.
@@ -75,14 +87,25 @@ func NewLoggingKeyProviderObserver(logger zerolog.Logger) *LoggingKeyProviderObs
 	return &LoggingKeyProviderObserver{logger: logger}
 }
 
-func (o *LoggingKeyProviderObserver) KeyProviderProbe(_ context.Context) keys.KeyProviderProbe {
-	return &loggingKeyProviderProbe{logger: o.logger}
+func (o *LoggingKeyProviderObserver) KeyProvisionStarted(ctx context.Context) (context.Context, keys.KeyProvisionProbe) {
+	return ctx, &loggingKeyProvisionProbe{
+		logger:    o.logger,
+		startTime: time.Now(),
+	}
 }
 
-type loggingKeyProviderProbe struct {
-	logger zerolog.Logger
+type loggingKeyProvisionProbe struct {
+	keys.NoOpKeyProvisionProbe
+	logger    zerolog.Logger
+	startTime time.Time
 }
 
-func (p *loggingKeyProviderProbe) OldKeyDeletionFailed(keyID string, err error) {
+func (p *loggingKeyProvisionProbe) OldKeyDeletionFailed(keyID string, err error) {
 	p.logger.Warn().Err(err).Str("key_id", keyID).Msg("failed to schedule old key for deletion")
+}
+
+func (p *loggingKeyProvisionProbe) End() {
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("key provision completed")
 }

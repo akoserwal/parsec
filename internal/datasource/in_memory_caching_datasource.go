@@ -18,7 +18,7 @@ type InMemoryCachingDataSource struct {
 	source    service.DataSource
 	cacheable service.Cacheable
 	clock     clock.Clock
-	observer  DataSourceCacheObserver
+	observer  CacheObserver
 	mu        sync.RWMutex
 	entries   map[string]*cacheEntry
 }
@@ -42,10 +42,14 @@ func WithClock(clk clock.Clock) InMemoryCachingDataSourceOption {
 // NewInMemoryCachingDataSource wraps a data source with in-memory caching if it implements Cacheable.
 // obs is required when the source is cacheable; it is used on every Fetch.
 // Returns the original source if it doesn't implement Cacheable (obs is unused in that case).
-func NewInMemoryCachingDataSource(source service.DataSource, obs DataSourceCacheObserver, opts ...InMemoryCachingDataSourceOption) service.DataSource {
+func NewInMemoryCachingDataSource(source service.DataSource, obs CacheObserver, opts ...InMemoryCachingDataSourceOption) service.DataSource {
 	cacheable, ok := source.(service.Cacheable)
 	if !ok {
 		return source
+	}
+
+	if obs == nil {
+		obs = NoOpObserver{}
 	}
 
 	ds := &InMemoryCachingDataSource{
@@ -70,7 +74,8 @@ func (c *InMemoryCachingDataSource) Name() string {
 
 // Fetch checks the cache first, then fetches from source on miss
 func (c *InMemoryCachingDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
-	cacheProbe := c.observer.DataSourceCacheProbe(ctx, c.source.Name())
+	ctx, cacheProbe := c.observer.CacheFetchStarted(ctx, c.source.Name())
+	defer cacheProbe.End()
 
 	// Get the cache key (which is the masked input with only relevant fields)
 	maskedInput := c.cacheable.CacheKey(input)

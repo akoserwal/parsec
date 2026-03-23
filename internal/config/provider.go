@@ -30,33 +30,54 @@ type Provider struct {
 	httpFixtureBuilt     bool
 }
 
-// NewProvider creates a new provider from configuration and an observer.
-// The observer must be non-nil; domain constructors call observer methods
-// unconditionally.
-func NewProvider(config *Config, obs observer.Observer) *Provider {
-	return &Provider{config: config, obs: obs}
+// NewProvider creates a new provider from configuration.
+func NewProvider(config *Config) *Provider {
+	return &Provider{config: config}
+}
+
+// SetObserver sets the central observer for all components built by this provider.
+// Must be called before any component-building method if an external observer
+// is desired. If never called, Observer() lazily builds one from config.
+func (p *Provider) SetObserver(obs observer.Observer) {
+	p.obs = obs
 }
 
 // Observer returns the central observer.
-func (p *Provider) Observer() observer.Observer {
-	return p.obs
+// If SetObserver was called, returns that observer.
+// Otherwise, lazily creates one from the observability config.
+func (p *Provider) Observer() (observer.Observer, error) {
+	if p.obs != nil {
+		return p.obs, nil
+	}
+
+	obs, err := NewObserver(p.config.Observability)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create observer: %w", err)
+	}
+
+	p.obs = obs
+	return obs, nil
 }
 
 // TrustStore returns the configured trust store.
-// Panics if the trust store cannot be constructed: the process cannot run without it.
-func (p *Provider) TrustStore() trust.Store {
+func (p *Provider) TrustStore() (trust.Store, error) {
 	if p.trustStore != nil {
-		return p.trustStore
+		return p.trustStore, nil
+	}
+
+	obs, err := p.Observer()
+	if err != nil {
+		return nil, err
 	}
 
 	transport := p.HTTPTransport()
-	store, err := NewTrustStore(p.config.TrustStore, transport, p.obs)
+	store, err := NewTrustStore(p.config.TrustStore, transport, obs)
 	if err != nil {
-		panic(fmt.Sprintf("failed to create trust store: %v", err))
+		return nil, fmt.Errorf("failed to create trust store: %w", err)
 	}
 
 	p.trustStore = store
-	return store
+	return store, nil
 }
 
 // DataSourceRegistry returns the configured data source registry
@@ -65,8 +86,13 @@ func (p *Provider) DataSourceRegistry() (*service.DataSourceRegistry, error) {
 		return p.dataSourceRegistry, nil
 	}
 
+	obs, err := p.Observer()
+	if err != nil {
+		return nil, err
+	}
+
 	transport := p.HTTPTransport()
-	registry, err := NewDataSourceRegistry(p.config.DataSources, transport, p.obs)
+	registry, err := NewDataSourceRegistry(p.config.DataSources, transport, obs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create data source registry: %w", err)
 	}
@@ -81,7 +107,12 @@ func (p *Provider) IssuerRegistry() (service.Registry, error) {
 		return p.issuerRegistry, nil
 	}
 
-	registry, err := NewIssuerRegistry(*p.config, p.obs)
+	obs, err := p.Observer()
+	if err != nil {
+		return nil, err
+	}
+
+	registry, err := NewIssuerRegistry(*p.config, obs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create issuer registry: %w", err)
 	}
@@ -128,11 +159,16 @@ func (p *Provider) TokenService() (*service.TokenService, error) {
 		return nil, err
 	}
 
+	obs, err := p.Observer()
+	if err != nil {
+		return nil, err
+	}
+
 	tokenService := service.NewTokenService(
 		p.config.TrustDomain,
 		dataSourceRegistry,
 		issuerRegistry,
-		p.obs,
+		obs,
 	)
 
 	p.tokenService = tokenService

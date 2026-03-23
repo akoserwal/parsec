@@ -48,7 +48,7 @@ type JWKSServerConfig struct {
 	// Clock is used for time operations (defaults to system clock)
 	Clock clock.Clock
 
-	// Observer must be non-nil; use NoopObserver{} in tests.
+	// Observer must be non-nil; use NoOpObserver{} in tests.
 	Observer JWKSObserver
 }
 
@@ -71,15 +71,17 @@ func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 // Start begins the background cache refresh
 func (s *JWKSServer) Start(ctx context.Context) error {
 	// Populate cache immediately
-	initProbe := s.observer.JWKSCacheProbe(ctx)
+	ctx, initProbe := s.observer.CacheRefreshStarted(ctx)
 	if err := s.refreshCache(ctx, initProbe); err != nil {
 		initProbe.InitialCachePopulationFailed(err)
 	}
+	initProbe.End()
 
 	// Start background refresh
 	s.ticker = s.clock.Ticker(s.refreshInterval)
 	return s.ticker.Start(func(ctx context.Context) {
-		bgProbe := s.observer.JWKSCacheProbe(ctx)
+		ctx, bgProbe := s.observer.CacheRefreshStarted(ctx)
+		defer bgProbe.End()
 		if err := s.refreshCache(ctx, bgProbe); err != nil {
 			bgProbe.CacheRefreshFailed(err)
 		}
@@ -114,11 +116,13 @@ func (s *JWKSServer) GetJWKS(ctx context.Context, req *parsecv1.GetJWKSRequest) 
 
 	// Cache is empty (first request or failed initial population)
 	// Build the response synchronously to ensure immediate availability
-	return s.buildJWKSResponse(ctx, s.observer.JWKSCacheProbe(ctx))
+	ctx, syncProbe := s.observer.CacheRefreshStarted(ctx)
+	defer syncProbe.End()
+	return s.buildJWKSResponse(ctx, syncProbe)
 }
 
 // refreshCache updates the cached JWKS response in the background
-func (s *JWKSServer) refreshCache(ctx context.Context, p JWKSCacheProbe) error {
+func (s *JWKSServer) refreshCache(ctx context.Context, p CacheRefreshProbe) error {
 	resp, err := s.buildJWKSResponse(ctx, p)
 
 	s.mu.Lock()
@@ -139,7 +143,7 @@ func (s *JWKSServer) refreshCache(ctx context.Context, p JWKSCacheProbe) error {
 }
 
 // buildJWKSResponse builds a fresh JWKS response from all issuers
-func (s *JWKSServer) buildJWKSResponse(ctx context.Context, p JWKSCacheProbe) (*parsecv1.GetJWKSResponse, error) {
+func (s *JWKSServer) buildJWKSResponse(ctx context.Context, p CacheRefreshProbe) (*parsecv1.GetJWKSResponse, error) {
 	// Get all public keys from all issuers at once
 	publicKeys, err := s.issuerRegistry.GetAllPublicKeys(ctx)
 

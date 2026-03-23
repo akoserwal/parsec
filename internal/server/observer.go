@@ -2,50 +2,76 @@ package server
 
 import "context"
 
-// JWKSObserver creates probes for JWKS cache refresh cycles.
+// JWKSObserver is called at key points during JWKS cache operations.
+// Implementations should embed NoOpJWKSObserver for forward compatibility
+// with new methods added to this interface.
 type JWKSObserver interface {
-	// JWKSCacheProbe returns a probe for one cache build or refresh (initial or background).
-	JWKSCacheProbe(ctx context.Context) JWKSCacheProbe
+	// CacheRefreshStarted is called when a JWKS cache build or refresh begins.
+	// Returns a potentially modified context and a probe to track the operation.
+	CacheRefreshStarted(ctx context.Context) (context.Context, CacheRefreshProbe)
 }
 
-// JWKSCacheProbe receives JWKS cache lifecycle events for a single refresh.
-type JWKSCacheProbe interface {
+// CacheRefreshProbe tracks a single JWKS cache refresh invocation.
+// Implementations should embed NoOpCacheRefreshProbe for forward compatibility.
+type CacheRefreshProbe interface {
 	InitialCachePopulationFailed(err error)
 	CacheRefreshFailed(err error)
 	KeyConversionFailed(keyID string, err error)
+	End()
 }
 
-// ServerLifecycleObserver creates probes for server listen/serve lifecycle.
-type ServerLifecycleObserver interface {
-	// ServerLifecycleProbe returns a probe for the server's serve goroutines.
-	ServerLifecycleProbe(ctx context.Context) ServerLifecycleProbe
+// LifecycleObserver is called at key points during server lifecycle.
+// Implementations should embed NoOpLifecycleObserver for forward compatibility
+// with new methods added to this interface.
+type LifecycleObserver interface {
+	// ServeStarted is called when the server begins serving.
+	// Returns a potentially modified context and a probe to track the lifecycle.
+	ServeStarted(ctx context.Context) (context.Context, ServeProbe)
 }
 
-// ServerLifecycleProbe receives gRPC/HTTP serve failures for one server instance.
-type ServerLifecycleProbe interface {
+// ServeProbe tracks server lifecycle events for one server instance.
+// Implementations should embed NoOpServeProbe for forward compatibility.
+type ServeProbe interface {
 	GRPCServeFailed(err error)
 	HTTPServeFailed(err error)
+	End()
 }
 
-type noopJWKSCacheProbe struct{}
+// ServerObserver is the per-package aggregate for all server observer interfaces.
+type ServerObserver interface {
+	JWKSObserver
+	LifecycleObserver
+}
 
-func (noopJWKSCacheProbe) InitialCachePopulationFailed(error) {}
-func (noopJWKSCacheProbe) CacheRefreshFailed(error)           {}
-func (noopJWKSCacheProbe) KeyConversionFailed(string, error)  {}
+// --- NoOp implementations ---
 
-type noopServerLifecycleProbe struct{}
+// NoOpCacheRefreshProbe is a no-op implementation of CacheRefreshProbe.
+// Embed this in concrete probe types for forward compatibility.
+type NoOpCacheRefreshProbe struct{}
 
-func (noopServerLifecycleProbe) GRPCServeFailed(error) {}
-func (noopServerLifecycleProbe) HTTPServeFailed(error) {}
+func (NoOpCacheRefreshProbe) InitialCachePopulationFailed(error) {}
+func (NoOpCacheRefreshProbe) CacheRefreshFailed(error)           {}
+func (NoOpCacheRefreshProbe) KeyConversionFailed(string, error)  {}
+func (NoOpCacheRefreshProbe) End()                               {}
 
-// NoopObserver satisfies both JWKSObserver and ServerLifecycleObserver
+// NoOpServeProbe is a no-op implementation of ServeProbe.
+// Embed this in concrete probe types for forward compatibility.
+type NoOpServeProbe struct{}
+
+func (NoOpServeProbe) GRPCServeFailed(error) {}
+func (NoOpServeProbe) HTTPServeFailed(error) {}
+func (NoOpServeProbe) End()                  {}
+
+// NoOpObserver satisfies both JWKSObserver and LifecycleObserver
 // with empty probes. Useful in tests that don't care about observer events.
-type NoopObserver struct{}
+type NoOpObserver struct{}
 
-func (NoopObserver) JWKSCacheProbe(context.Context) JWKSCacheProbe {
-	return noopJWKSCacheProbe{}
+func (NoOpObserver) CacheRefreshStarted(ctx context.Context) (context.Context, CacheRefreshProbe) {
+	return ctx, NoOpCacheRefreshProbe{}
 }
 
-func (NoopObserver) ServerLifecycleProbe(context.Context) ServerLifecycleProbe {
-	return noopServerLifecycleProbe{}
+func (NoOpObserver) ServeStarted(ctx context.Context) (context.Context, ServeProbe) {
+	return ctx, NoOpServeProbe{}
 }
+
+var _ ServerObserver = NoOpObserver{}

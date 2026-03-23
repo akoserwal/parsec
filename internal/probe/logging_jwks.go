@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -19,22 +20,33 @@ func NewLoggingJWKSObserver(logger zerolog.Logger) *LoggingJWKSObserver {
 	return &LoggingJWKSObserver{logger: logger}
 }
 
-func (o *LoggingJWKSObserver) JWKSCacheProbe(_ context.Context) server.JWKSCacheProbe {
-	return &loggingJWKSCacheProbe{logger: o.logger}
+func (o *LoggingJWKSObserver) CacheRefreshStarted(ctx context.Context) (context.Context, server.CacheRefreshProbe) {
+	return ctx, &loggingCacheRefreshProbe{
+		logger:    o.logger,
+		startTime: time.Now(),
+	}
 }
 
-type loggingJWKSCacheProbe struct {
-	logger zerolog.Logger
+type loggingCacheRefreshProbe struct {
+	server.NoOpCacheRefreshProbe
+	logger    zerolog.Logger
+	startTime time.Time
 }
 
-func (p *loggingJWKSCacheProbe) InitialCachePopulationFailed(err error) {
+func (p *loggingCacheRefreshProbe) InitialCachePopulationFailed(err error) {
 	p.logger.Warn().Err(err).Msg("initial cache population failed, will retry")
 }
 
-func (p *loggingJWKSCacheProbe) CacheRefreshFailed(err error) {
+func (p *loggingCacheRefreshProbe) CacheRefreshFailed(err error) {
 	p.logger.Warn().Err(err).Msg("background cache refresh failed")
 }
 
-func (p *loggingJWKSCacheProbe) KeyConversionFailed(keyID string, err error) {
+func (p *loggingCacheRefreshProbe) KeyConversionFailed(keyID string, err error) {
 	p.logger.Warn().Err(err).Str("key_id", keyID).Msg("skipping key: conversion failed")
+}
+
+func (p *loggingCacheRefreshProbe) End() {
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("cache refresh completed")
 }

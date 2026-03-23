@@ -20,7 +20,7 @@ type LuaDataSource struct {
 	script       string
 	configSource luaservices.ConfigSource
 	httpConfig   luaservices.HTTPServiceConfig
-	observer     LuaDataSourceObserver
+	observer     LuaObserver
 }
 
 // LuaDataSourceConfig configures a Lua data source
@@ -51,7 +51,7 @@ type LuaDataSourceConfig struct {
 	HTTPConfig *luaservices.HTTPServiceConfig
 
 	// Observer for Lua-specific execution events. Must be non-nil.
-	Observer LuaDataSourceObserver
+	Observer LuaObserver
 }
 
 // NewLuaDataSource creates a new Lua data source
@@ -93,7 +93,7 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 
 	obs := config.Observer
 	if obs == nil {
-		obs = NoopObserver{}
+		obs = NoOpObserver{}
 	}
 
 	return &LuaDataSource{
@@ -112,7 +112,8 @@ func (ds *LuaDataSource) Name() string {
 
 // Fetch executes the Lua script to fetch data
 func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
-	p := ds.observer.LuaDataSourceProbe(ctx, ds.name)
+	_, p := ds.observer.LuaFetchStarted(ctx, ds.name)
+	defer p.End()
 
 	L := lua.NewState()
 	defer L.Close()

@@ -2,13 +2,14 @@ package probe
 
 import (
 	"context"
+	"time"
 
 	"github.com/rs/zerolog"
 
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-var _ trust.TrustValidationObserver = (*LoggingTrustValidationObserver)(nil)
+var _ trust.ValidationObserver = (*LoggingTrustValidationObserver)(nil)
 
 // LoggingTrustValidationObserver logs trust validation events via zerolog.
 type LoggingTrustValidationObserver struct {
@@ -19,15 +20,20 @@ func NewLoggingTrustValidationObserver(logger zerolog.Logger) *LoggingTrustValid
 	return &LoggingTrustValidationObserver{logger: logger}
 }
 
-func (o *LoggingTrustValidationObserver) TrustValidationProbe(_ context.Context) trust.TrustValidationProbe {
-	return &loggingTrustValidationProbe{logger: o.logger}
+func (o *LoggingTrustValidationObserver) ValidationStarted(ctx context.Context) (context.Context, trust.ValidationProbe) {
+	return ctx, &loggingValidationProbe{
+		logger:    o.logger,
+		startTime: time.Now(),
+	}
 }
 
-type loggingTrustValidationProbe struct {
-	logger zerolog.Logger
+type loggingValidationProbe struct {
+	trust.NoOpValidationProbe
+	logger    zerolog.Logger
+	startTime time.Time
 }
 
-func (p *loggingTrustValidationProbe) ValidatorFailed(validatorName string, credType trust.CredentialType, err error) {
+func (p *loggingValidationProbe) ValidatorFailed(validatorName string, credType trust.CredentialType, err error) {
 	p.logger.Debug().
 		Err(err).
 		Str("validator", validatorName).
@@ -35,7 +41,7 @@ func (p *loggingTrustValidationProbe) ValidatorFailed(validatorName string, cred
 		Msg("validator rejected credential")
 }
 
-func (p *loggingTrustValidationProbe) AllValidatorsFailed(credType trust.CredentialType, attempted int, lastErr error) {
+func (p *loggingValidationProbe) AllValidatorsFailed(credType trust.CredentialType, attempted int, lastErr error) {
 	p.logger.Warn().
 		Err(lastErr).
 		Str("credential_type", string(credType)).
@@ -43,16 +49,22 @@ func (p *loggingTrustValidationProbe) AllValidatorsFailed(credType trust.Credent
 		Msg("all validators failed for credential type")
 }
 
-func (p *loggingTrustValidationProbe) ValidatorFiltered(validatorName string, actorSubject string) {
+func (p *loggingValidationProbe) ValidatorFiltered(validatorName string, actorSubject string) {
 	p.logger.Debug().
 		Str("validator", validatorName).
 		Str("actor", actorSubject).
 		Msg("validator filtered out for actor")
 }
 
-func (p *loggingTrustValidationProbe) FilterEvaluationFailed(validatorName string, err error) {
+func (p *loggingValidationProbe) FilterEvaluationFailed(validatorName string, err error) {
 	p.logger.Error().
 		Err(err).
 		Str("validator", validatorName).
 		Msg("filter evaluation failed")
+}
+
+func (p *loggingValidationProbe) End() {
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("trust validation completed")
 }

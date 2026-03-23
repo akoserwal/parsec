@@ -8,8 +8,11 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/project-kessel/parsec/internal/datasource"
+	"github.com/project-kessel/parsec/internal/keys"
 	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/probe"
+	"github.com/project-kessel/parsec/internal/server"
 )
 
 // LoggerContext couples a zerolog logger with its destination writer so
@@ -31,14 +34,14 @@ func NewObserver(cfg *ObservabilityConfig) (observer.Observer, error) {
 // observer interfaces (cache, keys, trust, JWKS, server lifecycle).
 func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (observer.Observer, error) {
 	if cfg == nil {
-		return observer.Noop(), nil
+		return observer.NoOp(), nil
 	}
 
 	switch cfg.Type {
 	case "logging":
 		return newLoggingObserver(cfg, logCtx), nil
 	case "noop", "":
-		return observer.Noop(), nil
+		return observer.NoOp(), nil
 	case "composite":
 		return newCompositeObserver(cfg, logCtx)
 	default:
@@ -60,13 +63,28 @@ func newLoggingObserver(cfg *ObservabilityConfig, logCtx LoggerContext) observer
 
 	return observer.Compose(
 		app,
-		probe.NewLoggingDataSourceCacheObserver(EventLogger(logCtx, "datasource_cache", cfg.DataSourceCache)),
-		probe.NewLoggingLuaDataSourceObserver(EventLogger(logCtx, "lua_datasource", cfg.LuaDataSource)),
-		probe.NewLoggingKeyRotationObserver(EventLogger(logCtx, "key_rotation", cfg.KeyRotation)),
-		probe.NewLoggingKeyProviderObserver(EventLogger(logCtx, "key_provider", cfg.KeyProvider)),
+		struct {
+			datasource.CacheObserver
+			datasource.LuaObserver
+		}{
+			CacheObserver: probe.NewLoggingDataSourceCacheObserver(EventLogger(logCtx, "datasource_cache", cfg.DataSourceCache)),
+			LuaObserver:   probe.NewLoggingLuaDataSourceObserver(EventLogger(logCtx, "lua_datasource", cfg.LuaDataSource)),
+		},
+		struct {
+			keys.RotationObserver
+			keys.ProviderObserver
+		}{
+			RotationObserver: probe.NewLoggingKeyRotationObserver(EventLogger(logCtx, "key_rotation", cfg.KeyRotation)),
+			ProviderObserver: probe.NewLoggingKeyProviderObserver(EventLogger(logCtx, "key_provider", cfg.KeyProvider)),
+		},
 		probe.NewLoggingTrustValidationObserver(EventLogger(logCtx, "trust_validation", cfg.TrustValidation)),
-		probe.NewLoggingJWKSObserver(EventLogger(logCtx, "jwks_cache", cfg.JWKSCache)),
-		probe.NewLoggingServerLifecycleObserver(EventLogger(logCtx, "server_lifecycle", cfg.ServerLifecycle)),
+		struct {
+			server.JWKSObserver
+			server.LifecycleObserver
+		}{
+			JWKSObserver:      probe.NewLoggingJWKSObserver(EventLogger(logCtx, "jwks_cache", cfg.JWKSCache)),
+			LifecycleObserver: probe.NewLoggingServerLifecycleObserver(EventLogger(logCtx, "server_lifecycle", cfg.ServerLifecycle)),
+		},
 	)
 }
 

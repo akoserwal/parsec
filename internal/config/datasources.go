@@ -118,7 +118,7 @@ func buildHTTPConfig(cfg *HTTPConfig, transport http.RoundTripper) (*luaservices
 
 // wrapWithCaching wraps a data source with the configured caching layer.
 // This is the coupling point where the central observer is narrowed to
-// the cache-specific DataSourceCacheObserver sub-interface.
+// the cache-specific CacheObserver sub-interface.
 func wrapWithCaching(ds service.DataSource, cfg CachingConfig, obs observer.Observer) (service.DataSource, error) {
 	switch cfg.Type {
 	case "in_memory":

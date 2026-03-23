@@ -2,13 +2,14 @@ package probe
 
 import (
 	"context"
+	"time"
 
 	"github.com/rs/zerolog"
 
 	"github.com/project-kessel/parsec/internal/datasource"
 )
 
-var _ datasource.LuaDataSourceObserver = (*LoggingLuaDataSourceObserver)(nil)
+var _ datasource.LuaObserver = (*LoggingLuaDataSourceObserver)(nil)
 
 type LoggingLuaDataSourceObserver struct {
 	logger zerolog.Logger
@@ -18,28 +19,37 @@ func NewLoggingLuaDataSourceObserver(logger zerolog.Logger) *LoggingLuaDataSourc
 	return &LoggingLuaDataSourceObserver{logger: logger}
 }
 
-func (o *LoggingLuaDataSourceObserver) LuaDataSourceProbe(_ context.Context, dataSourceName string) datasource.LuaDataSourceProbe {
-	return &loggingLuaDataSourceProbe{
-		logger: o.logger.With().Str("datasource", dataSourceName).Logger(),
+func (o *LoggingLuaDataSourceObserver) LuaFetchStarted(ctx context.Context, dataSourceName string) (context.Context, datasource.LuaFetchProbe) {
+	return ctx, &loggingLuaFetchProbe{
+		logger:    o.logger.With().Str("datasource", dataSourceName).Logger(),
+		startTime: time.Now(),
 	}
 }
 
-type loggingLuaDataSourceProbe struct {
-	logger zerolog.Logger
+type loggingLuaFetchProbe struct {
+	datasource.NoOpLuaFetchProbe
+	logger    zerolog.Logger
+	startTime time.Time
 }
 
-func (p *loggingLuaDataSourceProbe) ScriptLoadFailed(err error) {
+func (p *loggingLuaFetchProbe) ScriptLoadFailed(err error) {
 	p.logger.Error().Err(err).Msg("lua script load failed")
 }
 
-func (p *loggingLuaDataSourceProbe) ScriptExecutionFailed(err error) {
+func (p *loggingLuaFetchProbe) ScriptExecutionFailed(err error) {
 	p.logger.Error().Err(err).Msg("lua script execution failed")
 }
 
-func (p *loggingLuaDataSourceProbe) InvalidReturnType(got string) {
+func (p *loggingLuaFetchProbe) InvalidReturnType(got string) {
 	p.logger.Error().Str("got", got).Msg("lua fetch returned invalid type (expected table or nil)")
 }
 
-func (p *loggingLuaDataSourceProbe) FetchCompleted() {
+func (p *loggingLuaFetchProbe) FetchCompleted() {
 	p.logger.Debug().Msg("lua fetch completed")
+}
+
+func (p *loggingLuaFetchProbe) End() {
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("lua fetch ended")
 }

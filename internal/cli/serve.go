@@ -25,7 +25,10 @@ type runtimeComponents struct {
 }
 
 func buildRuntimeComponents(provider *config.Provider) (*runtimeComponents, error) {
-	trustStore := provider.TrustStore()
+	trustStore, err := provider.TrustStore()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create trust store: %w", err)
+	}
 
 	tokenService, err := provider.TokenService()
 	if err != nil {
@@ -141,8 +144,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	loader.SetReloadLogger(config.EventLogger(logCtx, "config_reload", reloadCfg))
 
-	// 4. Create provider with the single observer
-	provider := config.NewProvider(cfg, obs)
+	// 4. Create provider and inject the observer
+	provider := config.NewProvider(cfg)
+	provider.SetObserver(obs)
 
 	// 5. Build components via provider
 	components, err := buildRuntimeComponents(provider)

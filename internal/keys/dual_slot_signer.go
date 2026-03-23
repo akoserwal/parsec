@@ -60,7 +60,7 @@ type DualSlotRotatingSigner struct {
 
 	clock    clock.Clock
 	ticker   clock.Ticker
-	observer KeyRotationObserver
+	observer RotationObserver
 }
 
 // DualSlotRotatingSignerConfig configures the DualSlotRotatingSigner
@@ -79,8 +79,8 @@ type DualSlotRotatingSignerConfig struct {
 	CheckInterval     time.Duration
 	PrepareTimeout    time.Duration // How long to wait before retrying a stuck "preparing" state (default: 1 minute)
 
-	// Observer must be non-nil; use NoopObserver{} in tests.
-	Observer KeyRotationObserver
+	// Observer must be non-nil; use NoOpObserver{} in tests.
+	Observer RotationObserver
 }
 
 // NewDualSlotRotatingSigner creates a new dual-slot rotating signer.
@@ -147,7 +147,8 @@ func (r *DualSlotRotatingSigner) Start(ctx context.Context) error {
 	}
 
 	// Initialize active key cache
-	if err := r.updateActiveKeyCache(ctx, r.observer.KeyRotationProbe(ctx)); err != nil {
+	_, initProbe := r.observer.RotationCheckStarted(ctx)
+	if err := r.updateActiveKeyCache(ctx, initProbe); err != nil {
 		return fmt.Errorf("failed to initialize active key cache: %w", err)
 	}
 
@@ -169,7 +170,8 @@ func (r *DualSlotRotatingSigner) Stop() {
 
 // doRotationCheck is called periodically by the ticker to check for rotation needs
 func (r *DualSlotRotatingSigner) doRotationCheck(ctx context.Context) {
-	p := r.observer.KeyRotationProbe(ctx)
+	ctx, p := r.observer.RotationCheckStarted(ctx)
+	defer p.End()
 	if err := r.checkAndRotate(ctx, p); err != nil {
 		p.RotationCheckFailed(err)
 	}
@@ -288,7 +290,7 @@ func (r *DualSlotRotatingSigner) ensureInitialKey(ctx context.Context) error {
 }
 
 // checkAndRotate checks if rotation is needed and performs it using two-phase rotation
-func (r *DualSlotRotatingSigner) checkAndRotate(ctx context.Context, p KeyRotationProbe) error {
+func (r *DualSlotRotatingSigner) checkAndRotate(ctx context.Context, p RotationCheckProbe) error {
 	// 1. Read all slots and store version
 	slots, storeVersion, err := r.slotStore.ListSlots(ctx)
 	if err != nil {
@@ -461,7 +463,7 @@ func (r *DualSlotRotatingSigner) selectSlotsForRotation(slotA, slotB *KeySlot) (
 }
 
 // updateActiveKeyCache queries the state store and updates the cached active key and public keys
-func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context, p KeyRotationProbe) error {
+func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context, p RotationCheckProbe) error {
 	slots, _, err := r.slotStore.ListSlots(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list slots: %w", err)

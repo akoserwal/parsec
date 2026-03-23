@@ -36,18 +36,18 @@ func assertLog(t *testing.T, out, level, msg string, fields ...string) {
 func TestLoggingDataSourceCacheObserver_DebugEvents(t *testing.T) {
 	tests := []struct {
 		name string
-		call func(datasource.DataSourceCacheProbe)
+		call func(datasource.CacheFetchProbe)
 		msg  string
 	}{
-		{"CacheHit", func(p datasource.DataSourceCacheProbe) { p.CacheHit() }, "cache hit"},
-		{"CacheMiss", func(p datasource.DataSourceCacheProbe) { p.CacheMiss() }, "cache miss"},
-		{"CacheExpired", func(p datasource.DataSourceCacheProbe) { p.CacheExpired() }, "cache entry expired"},
+		{"CacheHit", func(p datasource.CacheFetchProbe) { p.CacheHit() }, "cache hit"},
+		{"CacheMiss", func(p datasource.CacheFetchProbe) { p.CacheMiss() }, "cache miss"},
+		{"CacheExpired", func(p datasource.CacheFetchProbe) { p.CacheExpired() }, "cache entry expired"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			obs := NewLoggingDataSourceCacheObserver(testLogger(&buf))
-			p := obs.DataSourceCacheProbe(context.Background(), "ds")
+			_, p := obs.CacheFetchStarted(context.Background(), "ds")
 			tt.call(p)
 			assertLog(t, buf.String(), "debug", tt.msg, `"datasource":"ds"`)
 		})
@@ -57,7 +57,7 @@ func TestLoggingDataSourceCacheObserver_DebugEvents(t *testing.T) {
 func TestLoggingDataSourceCacheObserver_FetchFailed(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingDataSourceCacheObserver(testLogger(&buf))
-	p := obs.DataSourceCacheProbe(context.Background(), "my_ds")
+	_, p := obs.CacheFetchStarted(context.Background(), "my_ds")
 
 	p.FetchFailed(errors.New("timeout"))
 
@@ -70,19 +70,19 @@ func TestLoggingDataSourceCacheObserver_FetchFailed(t *testing.T) {
 func TestLoggingLuaDataSourceObserver_ErrorEvents(t *testing.T) {
 	tests := []struct {
 		name  string
-		call  func(datasource.LuaDataSourceProbe)
+		call  func(datasource.LuaFetchProbe)
 		level string
 		msg   string
 	}{
-		{"ScriptLoadFailed", func(p datasource.LuaDataSourceProbe) { p.ScriptLoadFailed(errors.New("syntax error")) }, "error", "lua script load failed"},
-		{"ScriptExecutionFailed", func(p datasource.LuaDataSourceProbe) { p.ScriptExecutionFailed(errors.New("nil ref")) }, "error", "lua script execution failed"},
-		{"InvalidReturnType", func(p datasource.LuaDataSourceProbe) { p.InvalidReturnType("number") }, "error", "lua fetch returned invalid type"},
+		{"ScriptLoadFailed", func(p datasource.LuaFetchProbe) { p.ScriptLoadFailed(errors.New("syntax error")) }, "error", "lua script load failed"},
+		{"ScriptExecutionFailed", func(p datasource.LuaFetchProbe) { p.ScriptExecutionFailed(errors.New("nil ref")) }, "error", "lua script execution failed"},
+		{"InvalidReturnType", func(p datasource.LuaFetchProbe) { p.InvalidReturnType("number") }, "error", "lua fetch returned invalid type"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			obs := NewLoggingLuaDataSourceObserver(testLogger(&buf))
-			p := obs.LuaDataSourceProbe(context.Background(), "my_lua_ds")
+			_, p := obs.LuaFetchStarted(context.Background(), "my_lua_ds")
 			tt.call(p)
 			assertLog(t, buf.String(), tt.level, tt.msg, `"datasource":"my_lua_ds"`)
 		})
@@ -92,7 +92,7 @@ func TestLoggingLuaDataSourceObserver_ErrorEvents(t *testing.T) {
 func TestLoggingLuaDataSourceObserver_FetchCompleted(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingLuaDataSourceObserver(testLogger(&buf))
-	p := obs.LuaDataSourceProbe(context.Background(), "my_lua_ds")
+	_, p := obs.LuaFetchStarted(context.Background(), "my_lua_ds")
 	p.FetchCompleted()
 	assertLog(t, buf.String(), "debug", "lua fetch completed", `"datasource":"my_lua_ds"`)
 }
@@ -102,7 +102,7 @@ func TestLoggingLuaDataSourceObserver_FetchCompleted(t *testing.T) {
 func TestLoggingKeyRotationObserver_RotationCheckFailed(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingKeyRotationObserver(testLogger(&buf))
-	p := obs.KeyRotationProbe(context.Background())
+	_, p := obs.RotationCheckStarted(context.Background())
 
 	p.RotationCheckFailed(errors.New("slot locked"))
 
@@ -113,20 +113,20 @@ func TestLoggingKeyRotationObserver_RotationCheckFailed(t *testing.T) {
 func TestLoggingKeyRotationObserver_InfoEvents(t *testing.T) {
 	tests := []struct {
 		name string
-		call func(keys.KeyRotationProbe)
+		call func(keys.RotationCheckProbe)
 		msg  string
 		slot string
 	}{
-		{"RotationCompleted", func(p keys.KeyRotationProbe) { p.RotationCompleted("primary") },
+		{"RotationCompleted", func(p keys.RotationCheckProbe) { p.RotationCompleted("primary") },
 			"key rotation completed", "primary"},
-		{"RotationSkippedVersionRace", func(p keys.KeyRotationProbe) { p.RotationSkippedVersionRace("secondary") },
+		{"RotationSkippedVersionRace", func(p keys.RotationCheckProbe) { p.RotationSkippedVersionRace("secondary") },
 			"another process completed rotation, skipping", "secondary"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			obs := NewLoggingKeyRotationObserver(testLogger(&buf))
-			p := obs.KeyRotationProbe(context.Background())
+			_, p := obs.RotationCheckStarted(context.Background())
 			tt.call(p)
 			assertLog(t, buf.String(), "info", tt.msg,
 				fmt.Sprintf(`"slot":"%s"`, tt.slot))
@@ -137,7 +137,7 @@ func TestLoggingKeyRotationObserver_InfoEvents(t *testing.T) {
 func TestLoggingKeyRotationObserver_KeyProviderNotFound(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingKeyRotationObserver(testLogger(&buf))
-	p := obs.KeyRotationProbe(context.Background())
+	_, p := obs.RotationCheckStarted(context.Background())
 
 	p.KeyProviderNotFound("aws_kms", "primary")
 
@@ -148,19 +148,19 @@ func TestLoggingKeyRotationObserver_KeyProviderNotFound(t *testing.T) {
 func TestLoggingKeyRotationObserver_WarningMethods(t *testing.T) {
 	tests := []struct {
 		name string
-		call func(keys.KeyRotationProbe)
+		call func(keys.RotationCheckProbe)
 		msg  string
 	}{
-		{"KeyHandleFailed", func(p keys.KeyRotationProbe) { p.KeyHandleFailed("s1", errors.New("e")) }, "failed to get key handle"},
-		{"PublicKeyFailed", func(p keys.KeyRotationProbe) { p.PublicKeyFailed("s1", errors.New("e")) }, "failed to get public key"},
-		{"ThumbprintFailed", func(p keys.KeyRotationProbe) { p.ThumbprintFailed("s1", errors.New("e")) }, "failed to compute thumbprint"},
-		{"MetadataFailed", func(p keys.KeyRotationProbe) { p.MetadataFailed("s1", errors.New("e")) }, "failed to get key metadata"},
+		{"KeyHandleFailed", func(p keys.RotationCheckProbe) { p.KeyHandleFailed("s1", errors.New("e")) }, "failed to get key handle"},
+		{"PublicKeyFailed", func(p keys.RotationCheckProbe) { p.PublicKeyFailed("s1", errors.New("e")) }, "failed to get public key"},
+		{"ThumbprintFailed", func(p keys.RotationCheckProbe) { p.ThumbprintFailed("s1", errors.New("e")) }, "failed to compute thumbprint"},
+		{"MetadataFailed", func(p keys.RotationCheckProbe) { p.MetadataFailed("s1", errors.New("e")) }, "failed to get key metadata"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			obs := NewLoggingKeyRotationObserver(testLogger(&buf))
-			p := obs.KeyRotationProbe(context.Background())
+			_, p := obs.RotationCheckStarted(context.Background())
 			tt.call(p)
 			assertLog(t, buf.String(), "warn", tt.msg, `"slot":"s1"`)
 		})
@@ -172,7 +172,7 @@ func TestLoggingKeyRotationObserver_WarningMethods(t *testing.T) {
 func TestLoggingKeyProviderObserver_OldKeyDeletionFailed(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingKeyProviderObserver(testLogger(&buf))
-	p := obs.KeyProviderProbe(context.Background())
+	_, p := obs.KeyProvisionStarted(context.Background())
 
 	p.OldKeyDeletionFailed("key-123", errors.New("access denied"))
 
@@ -185,7 +185,7 @@ func TestLoggingKeyProviderObserver_OldKeyDeletionFailed(t *testing.T) {
 func TestLoggingTrustValidationObserver_ValidatorFailed(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingTrustValidationObserver(testLogger(&buf))
-	p := obs.TrustValidationProbe(context.Background())
+	_, p := obs.ValidationStarted(context.Background())
 
 	p.ValidatorFailed("oidc_v1", trust.CredentialTypeJWT, errors.New("expired"))
 
@@ -196,7 +196,7 @@ func TestLoggingTrustValidationObserver_ValidatorFailed(t *testing.T) {
 func TestLoggingTrustValidationObserver_AllValidatorsFailed(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingTrustValidationObserver(testLogger(&buf))
-	p := obs.TrustValidationProbe(context.Background())
+	_, p := obs.ValidationStarted(context.Background())
 
 	p.AllValidatorsFailed(trust.CredentialTypeBearer, 3, errors.New("no match"))
 
@@ -207,7 +207,7 @@ func TestLoggingTrustValidationObserver_AllValidatorsFailed(t *testing.T) {
 func TestLoggingTrustValidationObserver_ValidatorFiltered(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingTrustValidationObserver(testLogger(&buf))
-	p := obs.TrustValidationProbe(context.Background())
+	_, p := obs.ValidationStarted(context.Background())
 
 	p.ValidatorFiltered("v1", "actor-xyz")
 
@@ -218,7 +218,7 @@ func TestLoggingTrustValidationObserver_ValidatorFiltered(t *testing.T) {
 func TestLoggingTrustValidationObserver_FilterEvaluationFailed(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingTrustValidationObserver(testLogger(&buf))
-	p := obs.TrustValidationProbe(context.Background())
+	_, p := obs.ValidationStarted(context.Background())
 
 	p.FilterEvaluationFailed("v2", errors.New("cel error"))
 
@@ -231,20 +231,20 @@ func TestLoggingTrustValidationObserver_FilterEvaluationFailed(t *testing.T) {
 func TestLoggingJWKSObserver(t *testing.T) {
 	tests := []struct {
 		name   string
-		call   func(server.JWKSCacheProbe)
+		call   func(server.CacheRefreshProbe)
 		msg    string
 		fields []string
 	}{
 		{"InitialCachePopulationFailed",
-			func(p server.JWKSCacheProbe) { p.InitialCachePopulationFailed(errors.New("no issuers")) },
+			func(p server.CacheRefreshProbe) { p.InitialCachePopulationFailed(errors.New("no issuers")) },
 			"initial cache population failed, will retry",
 			[]string{`"error":"no issuers"`}},
 		{"CacheRefreshFailed",
-			func(p server.JWKSCacheProbe) { p.CacheRefreshFailed(errors.New("network")) },
+			func(p server.CacheRefreshProbe) { p.CacheRefreshFailed(errors.New("network")) },
 			"background cache refresh failed",
 			[]string{`"error":"network"`}},
 		{"KeyConversionFailed",
-			func(p server.JWKSCacheProbe) { p.KeyConversionFailed("kid-1", errors.New("unsupported alg")) },
+			func(p server.CacheRefreshProbe) { p.KeyConversionFailed("kid-1", errors.New("unsupported alg")) },
 			"skipping key: conversion failed",
 			[]string{`"key_id":"kid-1"`, `"error":"unsupported alg"`}},
 	}
@@ -252,7 +252,7 @@ func TestLoggingJWKSObserver(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			obs := NewLoggingJWKSObserver(testLogger(&buf))
-			p := obs.JWKSCacheProbe(context.Background())
+			_, p := obs.CacheRefreshStarted(context.Background())
 			tt.call(p)
 			assertLog(t, buf.String(), "warn", tt.msg, tt.fields...)
 		})
@@ -264,17 +264,17 @@ func TestLoggingJWKSObserver(t *testing.T) {
 func TestLoggingServerLifecycleObserver(t *testing.T) {
 	tests := []struct {
 		name string
-		call func(server.ServerLifecycleProbe)
+		call func(server.ServeProbe)
 		msg  string
 	}{
-		{"GRPCServeFailed", func(p server.ServerLifecycleProbe) { p.GRPCServeFailed(errors.New("bind error")) }, "gRPC server error"},
-		{"HTTPServeFailed", func(p server.ServerLifecycleProbe) { p.HTTPServeFailed(errors.New("port in use")) }, "HTTP server error"},
+		{"GRPCServeFailed", func(p server.ServeProbe) { p.GRPCServeFailed(errors.New("bind error")) }, "gRPC server error"},
+		{"HTTPServeFailed", func(p server.ServeProbe) { p.HTTPServeFailed(errors.New("port in use")) }, "HTTP server error"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			obs := NewLoggingServerLifecycleObserver(testLogger(&buf))
-			p := obs.ServerLifecycleProbe(context.Background())
+			_, p := obs.ServeStarted(context.Background())
 			tt.call(p)
 			assertLog(t, buf.String(), "error", tt.msg)
 		})

@@ -14,7 +14,7 @@ func TestDistributedCachingDataSource(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("caches results using groupcache", func(t *testing.T) {
-		source := &mockCacheableDataSource{
+		source := &stubCacheableDataSource{
 			name: "test-distributed",
 			ttl:  1 * time.Hour,
 		}
@@ -58,7 +58,7 @@ func TestDistributedCachingDataSource(t *testing.T) {
 	})
 
 	t.Run("different cache keys result in different cache entries", func(t *testing.T) {
-		source := &mockCacheableDataSource{
+		source := &stubCacheableDataSource{
 			name: "test-distributed",
 			ttl:  1 * time.Hour,
 		}
@@ -101,7 +101,7 @@ func TestDistributedCachingDataSource(t *testing.T) {
 	})
 
 	t.Run("returns non-cacheable source as-is", func(t *testing.T) {
-		source := &mockNonCacheableDataSource{
+		source := &stubNonCacheableDataSource{
 			name: "non-cacheable",
 		}
 
@@ -118,7 +118,7 @@ func TestDistributedCachingDataSource(t *testing.T) {
 	})
 
 	t.Run("uses default values for empty config", func(t *testing.T) {
-		source := &mockCacheableDataSource{
+		source := &stubCacheableDataSource{
 			name: "test-defaults",
 			ttl:  1 * time.Hour,
 		}
@@ -145,7 +145,7 @@ func TestDistributedCachingDataSource(t *testing.T) {
 		// This test verifies that cache entries with TTL are time-bucketed
 		// We can't easily test actual expiration, but we can verify that
 		// the cache key includes the TTL timestamp component
-		source := &mockCacheableDataSource{
+		source := &stubCacheableDataSource{
 			name: "test-ttl",
 			ttl:  5 * time.Minute,
 		}
@@ -182,7 +182,7 @@ func TestDistributedCachingDataSource(t *testing.T) {
 	})
 
 	t.Run("no TTL means no timestamp in cache key", func(t *testing.T) {
-		source := &mockCacheableDataSource{
+		source := &stubCacheableDataSource{
 			name: "test-no-ttl",
 			ttl:  0, // No TTL
 		}

@@ -13,8 +13,8 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-func TestNoop_AllProbeMethodsCallable(t *testing.T) {
-	obs := Noop()
+func TestNoOp_AllProbeMethodsCallable(t *testing.T) {
+	obs := NoOp()
 	ctx := context.Background()
 
 	ctx2, tip := obs.TokenIssuanceStarted(ctx, nil, nil, "", nil)
@@ -46,19 +46,19 @@ func TestNoop_AllProbeMethodsCallable(t *testing.T) {
 	acp.SubjectValidationFailed(errors.New("x"))
 	acp.End()
 
-	dp := obs.DataSourceCacheProbe(ctx, "ds")
+	_, dp := obs.CacheFetchStarted(ctx, "ds")
 	dp.CacheHit()
 	dp.CacheMiss()
 	dp.CacheExpired()
 	dp.FetchFailed(errors.New("x"))
 
-	lp := obs.LuaDataSourceProbe(ctx, "lua")
+	_, lp := obs.LuaFetchStarted(ctx, "lua")
 	lp.ScriptLoadFailed(errors.New("x"))
 	lp.ScriptExecutionFailed(errors.New("x"))
 	lp.InvalidReturnType("number")
 	lp.FetchCompleted()
 
-	kp := obs.KeyRotationProbe(ctx)
+	_, kp := obs.RotationCheckStarted(ctx)
 	kp.RotationCheckFailed(errors.New("x"))
 	kp.ActiveKeyCacheUpdateFailed(errors.New("x"))
 	kp.RotationCompleted("slot")
@@ -69,21 +69,21 @@ func TestNoop_AllProbeMethodsCallable(t *testing.T) {
 	kp.ThumbprintFailed("s", errors.New("x"))
 	kp.MetadataFailed("s", errors.New("x"))
 
-	pp := obs.KeyProviderProbe(ctx)
+	_, pp := obs.KeyProvisionStarted(ctx)
 	pp.OldKeyDeletionFailed("kid", errors.New("x"))
 
-	tp := obs.TrustValidationProbe(ctx)
+	_, tp := obs.ValidationStarted(ctx)
 	tp.ValidatorFailed("v", trust.CredentialTypeJWT, errors.New("x"))
 	tp.AllValidatorsFailed(trust.CredentialTypeBearer, 2, errors.New("x"))
 	tp.ValidatorFiltered("v", "actor")
 	tp.FilterEvaluationFailed("v", errors.New("x"))
 
-	jp := obs.JWKSCacheProbe(ctx)
+	_, jp := obs.CacheRefreshStarted(ctx)
 	jp.InitialCachePopulationFailed(errors.New("x"))
 	jp.CacheRefreshFailed(errors.New("x"))
 	jp.KeyConversionFailed("kid", errors.New("x"))
 
-	sp := obs.ServerLifecycleProbe(ctx)
+	_, sp := obs.ServeStarted(ctx)
 	sp.GRPCServeFailed(errors.New("x"))
 	sp.HTTPServeFailed(errors.New("x"))
 }
@@ -101,55 +101,61 @@ func TestCompose_DelegatesToCorrectSubObserver(t *testing.T) {
 
 	obs := Compose(
 		service.NoOpObserver(),
-		&spyDSCacheObserver{called: &cacheCalled},
-		&spyLuaDSObserver{called: &luaCalled},
-		&spyKeyRotObserver{called: &keyRotCalled},
-		&spyKeyProvObserver{called: &keyProvCalled},
+		struct {
+			datasource.CacheObserver
+			datasource.LuaObserver
+		}{&spyDSCacheObserver{called: &cacheCalled}, &spyLuaDSObserver{called: &luaCalled}},
+		struct {
+			keys.RotationObserver
+			keys.ProviderObserver
+		}{&spyKeyRotObserver{called: &keyRotCalled}, &spyKeyProvObserver{called: &keyProvCalled}},
 		&spyTrustObserver{called: &trustCalled},
-		&spyJWKSObserver{called: &jwksCalled},
-		&spySrvLifeObserver{called: &srvCalled},
+		struct {
+			server.JWKSObserver
+			server.LifecycleObserver
+		}{&spyJWKSObserver{called: &jwksCalled}, &spySrvLifeObserver{called: &srvCalled}},
 	)
 
 	ctx := context.Background()
 
-	obs.DataSourceCacheProbe(ctx, "ds")
+	obs.CacheFetchStarted(ctx, "ds")
 	if cacheCalled.Load() != 1 {
-		t.Errorf("DataSourceCacheProbe: expected cache observer called once, got %d", cacheCalled.Load())
+		t.Errorf("CacheFetchStarted: expected cache observer called once, got %d", cacheCalled.Load())
 	}
 
-	obs.LuaDataSourceProbe(ctx, "lua")
+	obs.LuaFetchStarted(ctx, "lua")
 	if luaCalled.Load() != 1 {
-		t.Errorf("LuaDataSourceProbe: expected lua observer called once, got %d", luaCalled.Load())
+		t.Errorf("LuaFetchStarted: expected lua observer called once, got %d", luaCalled.Load())
 	}
 
-	obs.KeyRotationProbe(ctx)
+	obs.RotationCheckStarted(ctx)
 	if keyRotCalled.Load() != 1 {
-		t.Errorf("KeyRotationProbe: expected key rotation observer called once, got %d", keyRotCalled.Load())
+		t.Errorf("RotationCheckStarted: expected key rotation observer called once, got %d", keyRotCalled.Load())
 	}
 
-	obs.KeyProviderProbe(ctx)
+	obs.KeyProvisionStarted(ctx)
 	if keyProvCalled.Load() != 1 {
-		t.Errorf("KeyProviderProbe: expected key provider observer called once, got %d", keyProvCalled.Load())
+		t.Errorf("KeyProvisionStarted: expected key provider observer called once, got %d", keyProvCalled.Load())
 	}
 
-	obs.TrustValidationProbe(ctx)
+	obs.ValidationStarted(ctx)
 	if trustCalled.Load() != 1 {
-		t.Errorf("TrustValidationProbe: expected trust observer called once, got %d", trustCalled.Load())
+		t.Errorf("ValidationStarted: expected trust observer called once, got %d", trustCalled.Load())
 	}
 
-	obs.JWKSCacheProbe(ctx)
+	obs.CacheRefreshStarted(ctx)
 	if jwksCalled.Load() != 1 {
-		t.Errorf("JWKSCacheProbe: expected JWKS observer called once, got %d", jwksCalled.Load())
+		t.Errorf("CacheRefreshStarted: expected JWKS observer called once, got %d", jwksCalled.Load())
 	}
 
-	obs.ServerLifecycleProbe(ctx)
+	obs.ServeStarted(ctx)
 	if srvCalled.Load() != 1 {
-		t.Errorf("ServerLifecycleProbe: expected server lifecycle observer called once, got %d", srvCalled.Load())
+		t.Errorf("ServeStarted: expected server lifecycle observer called once, got %d", srvCalled.Load())
 	}
 }
 
 func TestCompositeAll_SingleChild_ReturnsSame(t *testing.T) {
-	child := Noop()
+	child := NoOp()
 	result := CompositeAll([]Observer{child})
 	if result != child {
 		t.Error("CompositeAll with 1 child should return that child directly")
@@ -169,35 +175,47 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 
 	child1 := Compose(
 		service.NoOpObserver(),
-		&spyDSCacheObserver{called: &cache1},
-		&spyLuaDSObserver{called: &lua1},
-		&spyKeyRotObserver{called: &keyRot1},
-		&spyKeyProvObserver{called: &keyProv1},
+		struct {
+			datasource.CacheObserver
+			datasource.LuaObserver
+		}{&spyDSCacheObserver{called: &cache1}, &spyLuaDSObserver{called: &lua1}},
+		struct {
+			keys.RotationObserver
+			keys.ProviderObserver
+		}{&spyKeyRotObserver{called: &keyRot1}, &spyKeyProvObserver{called: &keyProv1}},
 		&spyTrustObserver{called: &trust1},
-		&spyJWKSObserver{called: &jwks1},
-		&spySrvLifeObserver{called: &srv1},
+		struct {
+			server.JWKSObserver
+			server.LifecycleObserver
+		}{&spyJWKSObserver{called: &jwks1}, &spySrvLifeObserver{called: &srv1}},
 	)
 	child2 := Compose(
 		service.NoOpObserver(),
-		&spyDSCacheObserver{called: &cache2},
-		&spyLuaDSObserver{called: &lua2},
-		&spyKeyRotObserver{called: &keyRot2},
-		&spyKeyProvObserver{called: &keyProv2},
+		struct {
+			datasource.CacheObserver
+			datasource.LuaObserver
+		}{&spyDSCacheObserver{called: &cache2}, &spyLuaDSObserver{called: &lua2}},
+		struct {
+			keys.RotationObserver
+			keys.ProviderObserver
+		}{&spyKeyRotObserver{called: &keyRot2}, &spyKeyProvObserver{called: &keyProv2}},
 		&spyTrustObserver{called: &trust2},
-		&spyJWKSObserver{called: &jwks2},
-		&spySrvLifeObserver{called: &srv2},
+		struct {
+			server.JWKSObserver
+			server.LifecycleObserver
+		}{&spyJWKSObserver{called: &jwks2}, &spySrvLifeObserver{called: &srv2}},
 	)
 
 	composite := CompositeAll([]Observer{child1, child2})
 	ctx := context.Background()
 
-	composite.DataSourceCacheProbe(ctx, "ds")
-	composite.LuaDataSourceProbe(ctx, "lua")
-	composite.KeyRotationProbe(ctx)
-	composite.KeyProviderProbe(ctx)
-	composite.TrustValidationProbe(ctx)
-	composite.JWKSCacheProbe(ctx)
-	composite.ServerLifecycleProbe(ctx)
+	composite.CacheFetchStarted(ctx, "ds")
+	composite.LuaFetchStarted(ctx, "lua")
+	composite.RotationCheckStarted(ctx)
+	composite.KeyProvisionStarted(ctx)
+	composite.ValidationStarted(ctx)
+	composite.CacheRefreshStarted(ctx)
+	composite.ServeStarted(ctx)
 
 	for _, tc := range []struct {
 		name   string
@@ -225,27 +243,27 @@ func TestCompositeAll_MultiProbe_FansOutEvents(t *testing.T) {
 
 	child1 := Compose(
 		service.NoOpObserver(),
-		&spyDSCacheObserver{called: new(atomic.Int32), hitCalled: &hits1},
-		datasource.NoopObserver{},
-		keys.NoopObserver{},
-		keys.NoopObserver{},
-		trust.NoopObserver{},
-		server.NoopObserver{},
-		server.NoopObserver{},
+		struct {
+			datasource.CacheObserver
+			datasource.LuaObserver
+		}{&spyDSCacheObserver{called: new(atomic.Int32), hitCalled: &hits1}, datasource.NoOpObserver{}},
+		keys.NoOpObserver{},
+		trust.NoOpObserver{},
+		server.NoOpObserver{},
 	)
 	child2 := Compose(
 		service.NoOpObserver(),
-		&spyDSCacheObserver{called: new(atomic.Int32), hitCalled: &hits2},
-		datasource.NoopObserver{},
-		keys.NoopObserver{},
-		keys.NoopObserver{},
-		trust.NoopObserver{},
-		server.NoopObserver{},
-		server.NoopObserver{},
+		struct {
+			datasource.CacheObserver
+			datasource.LuaObserver
+		}{&spyDSCacheObserver{called: new(atomic.Int32), hitCalled: &hits2}, datasource.NoOpObserver{}},
+		keys.NoOpObserver{},
+		trust.NoOpObserver{},
+		server.NoOpObserver{},
 	)
 
 	composite := CompositeAll([]Observer{child1, child2})
-	probe := composite.DataSourceCacheProbe(context.Background(), "ds")
+	_, probe := composite.CacheFetchStarted(context.Background(), "ds")
 	probe.CacheHit()
 
 	if hits1.Load() != 1 {
@@ -263,9 +281,9 @@ type spyDSCacheObserver struct {
 	hitCalled *atomic.Int32
 }
 
-func (s *spyDSCacheObserver) DataSourceCacheProbe(_ context.Context, _ string) datasource.DataSourceCacheProbe {
+func (s *spyDSCacheObserver) CacheFetchStarted(ctx context.Context, _ string) (context.Context, datasource.CacheFetchProbe) {
 	s.called.Add(1)
-	return &spyDSCacheProbe{hitCalled: s.hitCalled}
+	return ctx, &spyDSCacheProbe{hitCalled: s.hitCalled}
 }
 
 type spyDSCacheProbe struct{ hitCalled *atomic.Int32 }
@@ -278,45 +296,46 @@ func (s *spyDSCacheProbe) CacheHit() {
 func (s *spyDSCacheProbe) CacheMiss()        {}
 func (s *spyDSCacheProbe) CacheExpired()     {}
 func (s *spyDSCacheProbe) FetchFailed(error) {}
+func (s *spyDSCacheProbe) End()              {}
 
 type spyLuaDSObserver struct{ called *atomic.Int32 }
 
-func (s *spyLuaDSObserver) LuaDataSourceProbe(_ context.Context, _ string) datasource.LuaDataSourceProbe {
+func (s *spyLuaDSObserver) LuaFetchStarted(_ context.Context, _ string) (context.Context, datasource.LuaFetchProbe) {
 	s.called.Add(1)
-	return datasource.NoopObserver{}.LuaDataSourceProbe(context.Background(), "")
+	return datasource.NoOpObserver{}.LuaFetchStarted(context.Background(), "")
 }
 
 type spyKeyRotObserver struct{ called *atomic.Int32 }
 
-func (s *spyKeyRotObserver) KeyRotationProbe(_ context.Context) keys.KeyRotationProbe {
+func (s *spyKeyRotObserver) RotationCheckStarted(_ context.Context) (context.Context, keys.RotationCheckProbe) {
 	s.called.Add(1)
-	return keys.NoopObserver{}.KeyRotationProbe(context.Background())
+	return keys.NoOpObserver{}.RotationCheckStarted(context.Background())
 }
 
 type spyKeyProvObserver struct{ called *atomic.Int32 }
 
-func (s *spyKeyProvObserver) KeyProviderProbe(_ context.Context) keys.KeyProviderProbe {
+func (s *spyKeyProvObserver) KeyProvisionStarted(_ context.Context) (context.Context, keys.KeyProvisionProbe) {
 	s.called.Add(1)
-	return keys.NoopObserver{}.KeyProviderProbe(context.Background())
+	return keys.NoOpObserver{}.KeyProvisionStarted(context.Background())
 }
 
 type spyTrustObserver struct{ called *atomic.Int32 }
 
-func (s *spyTrustObserver) TrustValidationProbe(_ context.Context) trust.TrustValidationProbe {
+func (s *spyTrustObserver) ValidationStarted(_ context.Context) (context.Context, trust.ValidationProbe) {
 	s.called.Add(1)
-	return trust.NoopObserver{}.TrustValidationProbe(context.Background())
+	return trust.NoOpObserver{}.ValidationStarted(context.Background())
 }
 
 type spyJWKSObserver struct{ called *atomic.Int32 }
 
-func (s *spyJWKSObserver) JWKSCacheProbe(_ context.Context) server.JWKSCacheProbe {
+func (s *spyJWKSObserver) CacheRefreshStarted(_ context.Context) (context.Context, server.CacheRefreshProbe) {
 	s.called.Add(1)
-	return server.NoopObserver{}.JWKSCacheProbe(context.Background())
+	return server.NoOpObserver{}.CacheRefreshStarted(context.Background())
 }
 
 type spySrvLifeObserver struct{ called *atomic.Int32 }
 
-func (s *spySrvLifeObserver) ServerLifecycleProbe(_ context.Context) server.ServerLifecycleProbe {
+func (s *spySrvLifeObserver) ServeStarted(_ context.Context) (context.Context, server.ServeProbe) {
 	s.called.Add(1)
-	return server.NoopObserver{}.ServerLifecycleProbe(context.Background())
+	return server.NoOpObserver{}.ServeStarted(context.Background())
 }

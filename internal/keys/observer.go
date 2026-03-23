@@ -2,15 +2,18 @@ package keys
 
 import "context"
 
-// KeyRotationObserver creates probes for key rotation and active-key cache work.
-type KeyRotationObserver interface {
-	// KeyRotationProbe returns a probe for one rotation tick or cache refresh.
-	KeyRotationProbe(ctx context.Context) KeyRotationProbe
+// RotationObserver is called at key points during key rotation operations.
+// Implementations should embed NoOpRotationObserver for forward compatibility
+// with new methods added to this interface.
+type RotationObserver interface {
+	// RotationCheckStarted is called when a rotation check begins.
+	// Returns a potentially modified context and a probe to track the operation.
+	RotationCheckStarted(ctx context.Context) (context.Context, RotationCheckProbe)
 }
 
-// KeyRotationProbe receives key rotation lifecycle events for a single scope
-// (e.g. one background check or one cache rebuild).
-type KeyRotationProbe interface {
+// RotationCheckProbe tracks a single rotation check invocation.
+// Implementations should embed NoOpRotationCheckProbe for forward compatibility.
+type RotationCheckProbe interface {
 	RotationCheckFailed(err error)
 	ActiveKeyCacheUpdateFailed(err error)
 	RotationCompleted(slot string)
@@ -20,42 +23,65 @@ type KeyRotationProbe interface {
 	PublicKeyFailed(slot string, err error)
 	ThumbprintFailed(slot string, err error)
 	MetadataFailed(slot string, err error)
+	End()
 }
 
-// KeyProviderObserver creates probes for key provider lifecycle events.
-type KeyProviderObserver interface {
-	KeyProviderProbe(ctx context.Context) KeyProviderProbe
+// ProviderObserver is called at key points during key provisioning operations.
+// Implementations should embed NoOpProviderObserver for forward compatibility
+// with new methods added to this interface.
+type ProviderObserver interface {
+	// KeyProvisionStarted is called when a key provision operation begins.
+	// Returns a potentially modified context and a probe to track the operation.
+	KeyProvisionStarted(ctx context.Context) (context.Context, KeyProvisionProbe)
 }
 
-// KeyProviderProbe receives key provider lifecycle events for one operation.
-type KeyProviderProbe interface {
+// KeyProvisionProbe tracks a single key provisioning invocation.
+// Implementations should embed NoOpKeyProvisionProbe for forward compatibility.
+type KeyProvisionProbe interface {
 	OldKeyDeletionFailed(keyID string, err error)
+	End()
 }
 
-type noopKeyRotationProbe struct{}
+// KeysObserver is the per-package aggregate for all keys observer interfaces.
+type KeysObserver interface {
+	RotationObserver
+	ProviderObserver
+}
 
-func (noopKeyRotationProbe) RotationCheckFailed(error)          {}
-func (noopKeyRotationProbe) ActiveKeyCacheUpdateFailed(error)   {}
-func (noopKeyRotationProbe) RotationCompleted(string)           {}
-func (noopKeyRotationProbe) RotationSkippedVersionRace(string)  {}
-func (noopKeyRotationProbe) KeyProviderNotFound(string, string) {}
-func (noopKeyRotationProbe) KeyHandleFailed(string, error)      {}
-func (noopKeyRotationProbe) PublicKeyFailed(string, error)      {}
-func (noopKeyRotationProbe) ThumbprintFailed(string, error)     {}
-func (noopKeyRotationProbe) MetadataFailed(string, error)       {}
+// --- NoOp implementations ---
 
-type noopKeyProviderProbe struct{}
+// NoOpRotationCheckProbe is a no-op implementation of RotationCheckProbe.
+// Embed this in concrete probe types for forward compatibility.
+type NoOpRotationCheckProbe struct{}
 
-func (noopKeyProviderProbe) OldKeyDeletionFailed(string, error) {}
+func (NoOpRotationCheckProbe) RotationCheckFailed(error)          {}
+func (NoOpRotationCheckProbe) ActiveKeyCacheUpdateFailed(error)   {}
+func (NoOpRotationCheckProbe) RotationCompleted(string)           {}
+func (NoOpRotationCheckProbe) RotationSkippedVersionRace(string)  {}
+func (NoOpRotationCheckProbe) KeyProviderNotFound(string, string) {}
+func (NoOpRotationCheckProbe) KeyHandleFailed(string, error)      {}
+func (NoOpRotationCheckProbe) PublicKeyFailed(string, error)      {}
+func (NoOpRotationCheckProbe) ThumbprintFailed(string, error)     {}
+func (NoOpRotationCheckProbe) MetadataFailed(string, error)       {}
+func (NoOpRotationCheckProbe) End()                               {}
 
-// NoopObserver satisfies both KeyRotationObserver and KeyProviderObserver
+// NoOpKeyProvisionProbe is a no-op implementation of KeyProvisionProbe.
+// Embed this in concrete probe types for forward compatibility.
+type NoOpKeyProvisionProbe struct{}
+
+func (NoOpKeyProvisionProbe) OldKeyDeletionFailed(string, error) {}
+func (NoOpKeyProvisionProbe) End()                               {}
+
+// NoOpObserver satisfies both RotationObserver and ProviderObserver
 // with empty probes. Useful in tests that don't care about observer events.
-type NoopObserver struct{}
+type NoOpObserver struct{}
 
-func (NoopObserver) KeyRotationProbe(context.Context) KeyRotationProbe {
-	return noopKeyRotationProbe{}
+func (NoOpObserver) RotationCheckStarted(ctx context.Context) (context.Context, RotationCheckProbe) {
+	return ctx, NoOpRotationCheckProbe{}
 }
 
-func (NoopObserver) KeyProviderProbe(context.Context) KeyProviderProbe {
-	return noopKeyProviderProbe{}
+func (NoOpObserver) KeyProvisionStarted(ctx context.Context) (context.Context, KeyProvisionProbe) {
+	return ctx, NoOpKeyProvisionProbe{}
 }
+
+var _ KeysObserver = NoOpObserver{}

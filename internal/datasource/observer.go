@@ -2,56 +2,81 @@ package datasource
 
 import "context"
 
-// DataSourceCacheObserver creates request-scoped probes for cache lifecycle events.
-type DataSourceCacheObserver interface {
-	DataSourceCacheProbe(ctx context.Context, dataSourceName string) DataSourceCacheProbe
+// CacheObserver is called at key points during data source cache operations.
+// Implementations should embed NoOpCacheObserver for forward compatibility
+// with new methods added to this interface.
+type CacheObserver interface {
+	// CacheFetchStarted is called when a cache fetch begins.
+	// Returns a potentially modified context and a probe to track the operation.
+	CacheFetchStarted(ctx context.Context, dataSourceName string) (context.Context, CacheFetchProbe)
 }
 
-// DataSourceCacheProbe logs or records cache events for a single data source
-// without repeating the data source name on every call.
-type DataSourceCacheProbe interface {
+// CacheFetchProbe tracks a single cache fetch invocation.
+// Implementations should embed NoOpCacheFetchProbe for forward compatibility.
+type CacheFetchProbe interface {
 	CacheHit()
 	CacheMiss()
 	CacheExpired()
 	FetchFailed(err error)
+	End()
 }
 
-// LuaDataSourceObserver creates probes for Lua script execution events.
-type LuaDataSourceObserver interface {
-	LuaDataSourceProbe(ctx context.Context, dataSourceName string) LuaDataSourceProbe
+// LuaObserver is called at key points during Lua data source operations.
+// Implementations should embed NoOpLuaObserver for forward compatibility
+// with new methods added to this interface.
+type LuaObserver interface {
+	// LuaFetchStarted is called when a Lua fetch begins.
+	// Returns a potentially modified context and a probe to track the operation.
+	LuaFetchStarted(ctx context.Context, dataSourceName string) (context.Context, LuaFetchProbe)
 }
 
-// LuaDataSourceProbe receives Lua-specific execution events for one Fetch call.
-type LuaDataSourceProbe interface {
+// LuaFetchProbe tracks a single Lua fetch invocation.
+// Implementations should embed NoOpLuaFetchProbe for forward compatibility.
+type LuaFetchProbe interface {
 	ScriptLoadFailed(err error)
 	ScriptExecutionFailed(err error)
 	InvalidReturnType(got string)
 	FetchCompleted()
+	End()
 }
 
-// --- noop implementations ---
-
-type noopDataSourceCacheProbe struct{}
-
-func (noopDataSourceCacheProbe) CacheHit()         {}
-func (noopDataSourceCacheProbe) CacheMiss()        {}
-func (noopDataSourceCacheProbe) CacheExpired()     {}
-func (noopDataSourceCacheProbe) FetchFailed(error) {}
-
-type noopLuaDataSourceProbe struct{}
-
-func (noopLuaDataSourceProbe) ScriptLoadFailed(error)      {}
-func (noopLuaDataSourceProbe) ScriptExecutionFailed(error) {}
-func (noopLuaDataSourceProbe) InvalidReturnType(string)    {}
-func (noopLuaDataSourceProbe) FetchCompleted()             {}
-
-// NoopObserver satisfies both datasource observer interfaces with empty probes.
-type NoopObserver struct{}
-
-func (NoopObserver) DataSourceCacheProbe(context.Context, string) DataSourceCacheProbe {
-	return noopDataSourceCacheProbe{}
+// DataSourceObserver is the per-package aggregate for all datasource observer interfaces.
+type DataSourceObserver interface {
+	CacheObserver
+	LuaObserver
 }
 
-func (NoopObserver) LuaDataSourceProbe(context.Context, string) LuaDataSourceProbe {
-	return noopLuaDataSourceProbe{}
+// --- NoOp implementations ---
+
+// NoOpCacheFetchProbe is a no-op implementation of CacheFetchProbe.
+// Embed this in concrete probe types for forward compatibility.
+type NoOpCacheFetchProbe struct{}
+
+func (NoOpCacheFetchProbe) CacheHit()         {}
+func (NoOpCacheFetchProbe) CacheMiss()        {}
+func (NoOpCacheFetchProbe) CacheExpired()     {}
+func (NoOpCacheFetchProbe) FetchFailed(error) {}
+func (NoOpCacheFetchProbe) End()              {}
+
+// NoOpLuaFetchProbe is a no-op implementation of LuaFetchProbe.
+// Embed this in concrete probe types for forward compatibility.
+type NoOpLuaFetchProbe struct{}
+
+func (NoOpLuaFetchProbe) ScriptLoadFailed(error)      {}
+func (NoOpLuaFetchProbe) ScriptExecutionFailed(error) {}
+func (NoOpLuaFetchProbe) InvalidReturnType(string)    {}
+func (NoOpLuaFetchProbe) FetchCompleted()             {}
+func (NoOpLuaFetchProbe) End()                        {}
+
+// NoOpObserver satisfies both datasource observer interfaces with empty probes.
+type NoOpObserver struct{}
+
+func (NoOpObserver) CacheFetchStarted(ctx context.Context, _ string) (context.Context, CacheFetchProbe) {
+	return ctx, NoOpCacheFetchProbe{}
 }
+
+func (NoOpObserver) LuaFetchStarted(ctx context.Context, _ string) (context.Context, LuaFetchProbe) {
+	return ctx, NoOpLuaFetchProbe{}
+}
+
+var _ DataSourceObserver = NoOpObserver{}

@@ -21,7 +21,7 @@ type AWSKMSKeyProvider struct {
 	keyType     KeyType
 	algorithm   string
 	aliasPrefix string
-	observer    KeyProviderObserver
+	observer    ProviderObserver
 }
 
 // AWSKMSConfig configures the AWS KMS key provider
@@ -31,8 +31,8 @@ type AWSKMSConfig struct {
 	Region      string
 	AliasPrefix string
 	Client      *kms.Client
-	// Observer must be non-nil; use NoopObserver{} in tests.
-	Observer KeyProviderObserver
+	// Observer must be non-nil; use NoOpObserver{} in tests.
+	Observer ProviderObserver
 }
 
 // NewAWSKMSKeyProvider creates a new AWS KMS key provider.
@@ -91,7 +91,8 @@ func (m *AWSKMSKeyProvider) GetKeyHandle(ctx context.Context, trustDomain, names
 }
 
 func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespace, keyName string) error {
-	provProbe := m.observer.KeyProviderProbe(ctx)
+	ctx, provProbe := m.observer.KeyProvisionStarted(ctx)
+	defer provProbe.End()
 
 	// 1. Create new KMS key (CMK) using configured keyType
 	keySpec, err := keySpecFromKeyType(m.keyType)

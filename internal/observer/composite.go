@@ -34,221 +34,256 @@ type compositeAll struct {
 
 // --- probe factories: each creates probes from all children and wraps them ---
 
-func (c *compositeAll) DataSourceCacheProbe(ctx context.Context, name string) datasource.DataSourceCacheProbe {
-	probes := make([]datasource.DataSourceCacheProbe, len(c.children))
+func (c *compositeAll) CacheFetchStarted(ctx context.Context, name string) (context.Context, datasource.CacheFetchProbe) {
+	probes := make([]datasource.CacheFetchProbe, len(c.children))
 	for i, ch := range c.children {
-		probes[i] = ch.DataSourceCacheProbe(ctx, name)
+		ctx, probes[i] = ch.CacheFetchStarted(ctx, name)
 	}
-	return &multiDSCacheProbe{probes}
+	return ctx, &multiCacheFetchProbe{probes}
 }
 
-func (c *compositeAll) LuaDataSourceProbe(ctx context.Context, name string) datasource.LuaDataSourceProbe {
-	probes := make([]datasource.LuaDataSourceProbe, len(c.children))
+func (c *compositeAll) LuaFetchStarted(ctx context.Context, name string) (context.Context, datasource.LuaFetchProbe) {
+	probes := make([]datasource.LuaFetchProbe, len(c.children))
 	for i, ch := range c.children {
-		probes[i] = ch.LuaDataSourceProbe(ctx, name)
+		ctx, probes[i] = ch.LuaFetchStarted(ctx, name)
 	}
-	return &multiLuaDSProbe{probes}
+	return ctx, &multiLuaFetchProbe{probes}
 }
 
-func (c *compositeAll) KeyRotationProbe(ctx context.Context) keys.KeyRotationProbe {
-	probes := make([]keys.KeyRotationProbe, len(c.children))
+func (c *compositeAll) RotationCheckStarted(ctx context.Context) (context.Context, keys.RotationCheckProbe) {
+	probes := make([]keys.RotationCheckProbe, len(c.children))
 	for i, ch := range c.children {
-		probes[i] = ch.KeyRotationProbe(ctx)
+		ctx, probes[i] = ch.RotationCheckStarted(ctx)
 	}
-	return &multiKeyRotProbe{probes}
+	return ctx, &multiRotationCheckProbe{probes}
 }
 
-func (c *compositeAll) KeyProviderProbe(ctx context.Context) keys.KeyProviderProbe {
-	probes := make([]keys.KeyProviderProbe, len(c.children))
+func (c *compositeAll) KeyProvisionStarted(ctx context.Context) (context.Context, keys.KeyProvisionProbe) {
+	probes := make([]keys.KeyProvisionProbe, len(c.children))
 	for i, ch := range c.children {
-		probes[i] = ch.KeyProviderProbe(ctx)
+		ctx, probes[i] = ch.KeyProvisionStarted(ctx)
 	}
-	return &multiKeyProvProbe{probes}
+	return ctx, &multiKeyProvisionProbe{probes}
 }
 
-func (c *compositeAll) TrustValidationProbe(ctx context.Context) trust.TrustValidationProbe {
-	probes := make([]trust.TrustValidationProbe, len(c.children))
+func (c *compositeAll) ValidationStarted(ctx context.Context) (context.Context, trust.ValidationProbe) {
+	probes := make([]trust.ValidationProbe, len(c.children))
 	for i, ch := range c.children {
-		probes[i] = ch.TrustValidationProbe(ctx)
+		ctx, probes[i] = ch.ValidationStarted(ctx)
 	}
-	return &multiTrustProbe{probes}
+	return ctx, &multiValidationProbe{probes}
 }
 
-func (c *compositeAll) JWKSCacheProbe(ctx context.Context) server.JWKSCacheProbe {
-	probes := make([]server.JWKSCacheProbe, len(c.children))
+func (c *compositeAll) CacheRefreshStarted(ctx context.Context) (context.Context, server.CacheRefreshProbe) {
+	probes := make([]server.CacheRefreshProbe, len(c.children))
 	for i, ch := range c.children {
-		probes[i] = ch.JWKSCacheProbe(ctx)
+		ctx, probes[i] = ch.CacheRefreshStarted(ctx)
 	}
-	return &multiJWKSProbe{probes}
+	return ctx, &multiCacheRefreshProbe{probes}
 }
 
-func (c *compositeAll) ServerLifecycleProbe(ctx context.Context) server.ServerLifecycleProbe {
-	probes := make([]server.ServerLifecycleProbe, len(c.children))
+func (c *compositeAll) ServeStarted(ctx context.Context) (context.Context, server.ServeProbe) {
+	probes := make([]server.ServeProbe, len(c.children))
 	for i, ch := range c.children {
-		probes[i] = ch.ServerLifecycleProbe(ctx)
+		ctx, probes[i] = ch.ServeStarted(ctx)
 	}
-	return &multiSrvLifeProbe{probes}
+	return ctx, &multiServeProbe{probes}
 }
 
 // --- composite probes: fan out each event to all children ---
 
-type multiDSCacheProbe struct {
-	probes []datasource.DataSourceCacheProbe
+type multiCacheFetchProbe struct {
+	probes []datasource.CacheFetchProbe
 }
 
-func (m *multiDSCacheProbe) CacheHit() {
+func (m *multiCacheFetchProbe) CacheHit() {
 	for _, p := range m.probes {
 		p.CacheHit()
 	}
 }
-func (m *multiDSCacheProbe) CacheMiss() {
+func (m *multiCacheFetchProbe) CacheMiss() {
 	for _, p := range m.probes {
 		p.CacheMiss()
 	}
 }
-func (m *multiDSCacheProbe) CacheExpired() {
+func (m *multiCacheFetchProbe) CacheExpired() {
 	for _, p := range m.probes {
 		p.CacheExpired()
 	}
 }
-func (m *multiDSCacheProbe) FetchFailed(err error) {
+func (m *multiCacheFetchProbe) FetchFailed(err error) {
 	for _, p := range m.probes {
 		p.FetchFailed(err)
 	}
 }
-
-type multiLuaDSProbe struct {
-	probes []datasource.LuaDataSourceProbe
+func (m *multiCacheFetchProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
 }
 
-func (m *multiLuaDSProbe) ScriptLoadFailed(err error) {
+type multiLuaFetchProbe struct {
+	probes []datasource.LuaFetchProbe
+}
+
+func (m *multiLuaFetchProbe) ScriptLoadFailed(err error) {
 	for _, p := range m.probes {
 		p.ScriptLoadFailed(err)
 	}
 }
-func (m *multiLuaDSProbe) ScriptExecutionFailed(err error) {
+func (m *multiLuaFetchProbe) ScriptExecutionFailed(err error) {
 	for _, p := range m.probes {
 		p.ScriptExecutionFailed(err)
 	}
 }
-func (m *multiLuaDSProbe) InvalidReturnType(got string) {
+func (m *multiLuaFetchProbe) InvalidReturnType(got string) {
 	for _, p := range m.probes {
 		p.InvalidReturnType(got)
 	}
 }
-func (m *multiLuaDSProbe) FetchCompleted() {
+func (m *multiLuaFetchProbe) FetchCompleted() {
 	for _, p := range m.probes {
 		p.FetchCompleted()
 	}
 }
+func (m *multiLuaFetchProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
 
-type multiKeyRotProbe struct{ probes []keys.KeyRotationProbe }
+type multiRotationCheckProbe struct{ probes []keys.RotationCheckProbe }
 
-func (m *multiKeyRotProbe) RotationCheckFailed(err error) {
+func (m *multiRotationCheckProbe) RotationCheckFailed(err error) {
 	for _, p := range m.probes {
 		p.RotationCheckFailed(err)
 	}
 }
-func (m *multiKeyRotProbe) ActiveKeyCacheUpdateFailed(err error) {
+func (m *multiRotationCheckProbe) ActiveKeyCacheUpdateFailed(err error) {
 	for _, p := range m.probes {
 		p.ActiveKeyCacheUpdateFailed(err)
 	}
 }
-func (m *multiKeyRotProbe) RotationCompleted(slot string) {
+func (m *multiRotationCheckProbe) RotationCompleted(slot string) {
 	for _, p := range m.probes {
 		p.RotationCompleted(slot)
 	}
 }
-func (m *multiKeyRotProbe) RotationSkippedVersionRace(slot string) {
+func (m *multiRotationCheckProbe) RotationSkippedVersionRace(slot string) {
 	for _, p := range m.probes {
 		p.RotationSkippedVersionRace(slot)
 	}
 }
-func (m *multiKeyRotProbe) KeyProviderNotFound(prov, slot string) {
+func (m *multiRotationCheckProbe) KeyProviderNotFound(prov, slot string) {
 	for _, p := range m.probes {
 		p.KeyProviderNotFound(prov, slot)
 	}
 }
-func (m *multiKeyRotProbe) KeyHandleFailed(slot string, err error) {
+func (m *multiRotationCheckProbe) KeyHandleFailed(slot string, err error) {
 	for _, p := range m.probes {
 		p.KeyHandleFailed(slot, err)
 	}
 }
-func (m *multiKeyRotProbe) PublicKeyFailed(slot string, err error) {
+func (m *multiRotationCheckProbe) PublicKeyFailed(slot string, err error) {
 	for _, p := range m.probes {
 		p.PublicKeyFailed(slot, err)
 	}
 }
-func (m *multiKeyRotProbe) ThumbprintFailed(slot string, err error) {
+func (m *multiRotationCheckProbe) ThumbprintFailed(slot string, err error) {
 	for _, p := range m.probes {
 		p.ThumbprintFailed(slot, err)
 	}
 }
-func (m *multiKeyRotProbe) MetadataFailed(slot string, err error) {
+func (m *multiRotationCheckProbe) MetadataFailed(slot string, err error) {
 	for _, p := range m.probes {
 		p.MetadataFailed(slot, err)
 	}
 }
+func (m *multiRotationCheckProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
 
-type multiKeyProvProbe struct{ probes []keys.KeyProviderProbe }
+type multiKeyProvisionProbe struct{ probes []keys.KeyProvisionProbe }
 
-func (m *multiKeyProvProbe) OldKeyDeletionFailed(keyID string, err error) {
+func (m *multiKeyProvisionProbe) OldKeyDeletionFailed(keyID string, err error) {
 	for _, p := range m.probes {
 		p.OldKeyDeletionFailed(keyID, err)
 	}
 }
+func (m *multiKeyProvisionProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
 
-type multiTrustProbe struct{ probes []trust.TrustValidationProbe }
+type multiValidationProbe struct{ probes []trust.ValidationProbe }
 
-func (m *multiTrustProbe) ValidatorFailed(name string, ct trust.CredentialType, err error) {
+func (m *multiValidationProbe) ValidatorFailed(name string, ct trust.CredentialType, err error) {
 	for _, p := range m.probes {
 		p.ValidatorFailed(name, ct, err)
 	}
 }
-func (m *multiTrustProbe) AllValidatorsFailed(ct trust.CredentialType, n int, err error) {
+func (m *multiValidationProbe) AllValidatorsFailed(ct trust.CredentialType, n int, err error) {
 	for _, p := range m.probes {
 		p.AllValidatorsFailed(ct, n, err)
 	}
 }
-func (m *multiTrustProbe) ValidatorFiltered(name, actor string) {
+func (m *multiValidationProbe) ValidatorFiltered(name, actor string) {
 	for _, p := range m.probes {
 		p.ValidatorFiltered(name, actor)
 	}
 }
-func (m *multiTrustProbe) FilterEvaluationFailed(name string, err error) {
+func (m *multiValidationProbe) FilterEvaluationFailed(name string, err error) {
 	for _, p := range m.probes {
 		p.FilterEvaluationFailed(name, err)
 	}
 }
+func (m *multiValidationProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
 
-type multiJWKSProbe struct{ probes []server.JWKSCacheProbe }
+type multiCacheRefreshProbe struct{ probes []server.CacheRefreshProbe }
 
-func (m *multiJWKSProbe) InitialCachePopulationFailed(err error) {
+func (m *multiCacheRefreshProbe) InitialCachePopulationFailed(err error) {
 	for _, p := range m.probes {
 		p.InitialCachePopulationFailed(err)
 	}
 }
-func (m *multiJWKSProbe) CacheRefreshFailed(err error) {
+func (m *multiCacheRefreshProbe) CacheRefreshFailed(err error) {
 	for _, p := range m.probes {
 		p.CacheRefreshFailed(err)
 	}
 }
-func (m *multiJWKSProbe) KeyConversionFailed(keyID string, err error) {
+func (m *multiCacheRefreshProbe) KeyConversionFailed(keyID string, err error) {
 	for _, p := range m.probes {
 		p.KeyConversionFailed(keyID, err)
 	}
 }
+func (m *multiCacheRefreshProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
 
-type multiSrvLifeProbe struct{ probes []server.ServerLifecycleProbe }
+type multiServeProbe struct{ probes []server.ServeProbe }
 
-func (m *multiSrvLifeProbe) GRPCServeFailed(err error) {
+func (m *multiServeProbe) GRPCServeFailed(err error) {
 	for _, p := range m.probes {
 		p.GRPCServeFailed(err)
 	}
 }
-func (m *multiSrvLifeProbe) HTTPServeFailed(err error) {
+func (m *multiServeProbe) HTTPServeFailed(err error) {
 	for _, p := range m.probes {
 		p.HTTPServeFailed(err)
+	}
+}
+func (m *multiServeProbe) End() {
+	for _, p := range m.probes {
+		p.End()
 	}
 }
 

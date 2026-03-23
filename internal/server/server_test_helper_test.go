@@ -133,8 +133,8 @@ func stubServerConfig() Config {
 	return Config{
 		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Observer: NoopObserver{}}),
-		Observer:       NoopObserver{},
+		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Observer: NoOpObserver{}}),
+		Observer:       NoOpObserver{},
 	}
 }
 

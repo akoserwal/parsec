@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -100,14 +101,16 @@ func (o *loggingObserver) TokenIssuanceStarted(
 	requestLogger.Debug().Msg("Starting token issuance")
 
 	return ctx, &loggingTokenIssuanceProbe{
-		logger: requestLogger,
+		logger:    requestLogger,
+		startTime: time.Now(),
 	}
 }
 
 // loggingTokenIssuanceProbe is a request-scoped probe that logs events for a single token issuance
 type loggingTokenIssuanceProbe struct {
 	service.NoOpTokenIssuanceProbe
-	logger zerolog.Logger
+	logger    zerolog.Logger
+	startTime time.Time
 }
 
 func (p *loggingTokenIssuanceProbe) TokenTypeIssuanceStarted(tokenType service.TokenType) {
@@ -144,7 +147,9 @@ func (p *loggingTokenIssuanceProbe) IssuerNotFound(tokenType service.TokenType, 
 }
 
 func (p *loggingTokenIssuanceProbe) End() {
-	p.logger.Debug().Msg("Token issuance completed")
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("Token issuance completed")
 }
 
 // TokenExchangeStarted implements service.TokenExchangeObserver
@@ -159,14 +164,16 @@ func (o *loggingObserver) TokenExchangeStarted(
 	requestLogger.Debug().Msg("Starting token exchange")
 
 	return ctx, &loggingTokenExchangeProbe{
-		logger: requestLogger,
+		logger:    requestLogger,
+		startTime: time.Now(),
 	}
 }
 
 // loggingTokenExchangeProbe is a request-scoped probe that logs token exchange events
 type loggingTokenExchangeProbe struct {
 	service.NoOpTokenExchangeProbe
-	logger zerolog.Logger
+	logger    zerolog.Logger
+	startTime time.Time
 }
 
 func (p *loggingTokenExchangeProbe) ActorValidationSucceeded(actor *trust.Result) {
@@ -212,7 +219,9 @@ func (p *loggingTokenExchangeProbe) SubjectTokenValidationFailed(err error) {
 }
 
 func (p *loggingTokenExchangeProbe) End() {
-	p.logger.Debug().Msg("Token exchange completed")
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("Token exchange completed")
 }
 
 // AuthzCheckStarted implements service.AuthzCheckObserver
@@ -225,14 +234,16 @@ func (o *loggingObserver) AuthzCheckStarted(
 	requestLogger.Debug().Msg("Starting authorization check")
 
 	return ctx, &loggingAuthzCheckProbe{
-		logger: requestLogger,
+		logger:    requestLogger,
+		startTime: time.Now(),
 	}
 }
 
 // loggingAuthzCheckProbe is a request-scoped probe that logs authorization check events
 type loggingAuthzCheckProbe struct {
 	service.NoOpAuthzCheckProbe
-	logger zerolog.Logger
+	logger    zerolog.Logger
+	startTime time.Time
 }
 
 func (p *loggingAuthzCheckProbe) RequestAttributesParsed(attrs *request.RequestAttributes) {
@@ -290,5 +301,7 @@ func (p *loggingAuthzCheckProbe) SubjectValidationFailed(err error) {
 }
 
 func (p *loggingAuthzCheckProbe) End() {
-	p.logger.Debug().Msg("Authorization check completed")
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("Authorization check completed")
 }

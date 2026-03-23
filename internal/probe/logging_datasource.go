@@ -2,13 +2,14 @@ package probe
 
 import (
 	"context"
+	"time"
 
 	"github.com/rs/zerolog"
 
 	"github.com/project-kessel/parsec/internal/datasource"
 )
 
-var _ datasource.DataSourceCacheObserver = (*LoggingDataSourceCacheObserver)(nil)
+var _ datasource.CacheObserver = (*LoggingDataSourceCacheObserver)(nil)
 
 // LoggingDataSourceCacheObserver logs data source cache events via zerolog.
 type LoggingDataSourceCacheObserver struct {
@@ -19,28 +20,37 @@ func NewLoggingDataSourceCacheObserver(logger zerolog.Logger) *LoggingDataSource
 	return &LoggingDataSourceCacheObserver{logger: logger}
 }
 
-func (o *LoggingDataSourceCacheObserver) DataSourceCacheProbe(_ context.Context, dataSourceName string) datasource.DataSourceCacheProbe {
-	return &loggingDataSourceCacheProbe{
-		logger: o.logger.With().Str("datasource", dataSourceName).Logger(),
+func (o *LoggingDataSourceCacheObserver) CacheFetchStarted(ctx context.Context, dataSourceName string) (context.Context, datasource.CacheFetchProbe) {
+	return ctx, &loggingCacheFetchProbe{
+		logger:    o.logger.With().Str("datasource", dataSourceName).Logger(),
+		startTime: time.Now(),
 	}
 }
 
-type loggingDataSourceCacheProbe struct {
-	logger zerolog.Logger
+type loggingCacheFetchProbe struct {
+	datasource.NoOpCacheFetchProbe
+	logger    zerolog.Logger
+	startTime time.Time
 }
 
-func (p *loggingDataSourceCacheProbe) CacheHit() {
+func (p *loggingCacheFetchProbe) CacheHit() {
 	p.logger.Debug().Msg("cache hit")
 }
 
-func (p *loggingDataSourceCacheProbe) CacheMiss() {
+func (p *loggingCacheFetchProbe) CacheMiss() {
 	p.logger.Debug().Msg("cache miss")
 }
 
-func (p *loggingDataSourceCacheProbe) CacheExpired() {
+func (p *loggingCacheFetchProbe) CacheExpired() {
 	p.logger.Debug().Msg("cache entry expired")
 }
 
-func (p *loggingDataSourceCacheProbe) FetchFailed(err error) {
+func (p *loggingCacheFetchProbe) FetchFailed(err error) {
 	p.logger.Warn().Err(err).Msg("data source fetch failed")
+}
+
+func (p *loggingCacheFetchProbe) End() {
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("cache fetch completed")
 }

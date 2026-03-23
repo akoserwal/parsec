@@ -21,7 +21,7 @@ func TestNewObserverWithLogger_NilConfig_ReturnsNoop(t *testing.T) {
 	require.NotNil(t, obs)
 
 	ctx := context.Background()
-	p := obs.DataSourceCacheProbe(ctx, "ds")
+	_, p := obs.CacheFetchStarted(ctx, "ds")
 	p.CacheHit()
 }
 
@@ -33,7 +33,8 @@ func TestNewObserverWithLogger_NoopType(t *testing.T) {
 			require.NotNil(t, obs)
 
 			ctx := context.Background()
-			obs.KeyRotationProbe(ctx).RotationCompleted("slot")
+			_, rp := obs.RotationCheckStarted(ctx)
+			rp.RotationCompleted("slot")
 		})
 	}
 }
@@ -47,7 +48,7 @@ func TestNewObserverWithLogger_LoggingType(t *testing.T) {
 	require.NotNil(t, obs)
 
 	ctx := context.Background()
-	p := obs.DataSourceCacheProbe(ctx, "test-ds")
+	_, p := obs.CacheFetchStarted(ctx, "test-ds")
 	p.FetchFailed(errors.New("timeout"))
 
 	assert.Contains(t, buf.String(), "data source fetch failed")
@@ -69,7 +70,7 @@ func TestNewObserverWithLogger_CompositeType(t *testing.T) {
 	require.NotNil(t, obs)
 
 	ctx := context.Background()
-	p := obs.ServerLifecycleProbe(ctx)
+	_, p := obs.ServeStarted(ctx)
 	p.GRPCServeFailed(errors.New("bind error"))
 
 	output := buf.String()
