@@ -72,12 +72,17 @@ func NewAWSKMSKeyProvider(ctx context.Context, cfg AWSKMSConfig) (*AWSKMSKeyProv
 		return nil, fmt.Errorf("alias prefix must start with 'alias/', got: %s", cfg.AliasPrefix)
 	}
 
+	obs := cfg.Observer
+	if obs == nil {
+		obs = NoOpObserver{}
+	}
+
 	return &AWSKMSKeyProvider{
 		client:      client,
 		keyType:     cfg.KeyType,
 		algorithm:   algorithm,
 		aliasPrefix: cfg.AliasPrefix,
-		observer:    cfg.Observer,
+		observer:    obs,
 	}, nil
 }
 

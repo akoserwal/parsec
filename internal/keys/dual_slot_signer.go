@@ -115,6 +115,11 @@ func NewDualSlotRotatingSigner(cfg DualSlotRotatingSignerConfig) *DualSlotRotati
 		prepareTimeout = 1 * time.Minute
 	}
 
+	obs := cfg.Observer
+	if obs == nil {
+		obs = NoOpObserver{}
+	}
+
 	return &DualSlotRotatingSigner{
 		namespace:           cfg.Namespace,
 		trustDomain:         cfg.TrustDomain,
@@ -127,7 +132,7 @@ func NewDualSlotRotatingSigner(cfg DualSlotRotatingSignerConfig) *DualSlotRotati
 		checkInterval:       checkInterval,
 		prepareTimeout:      prepareTimeout,
 		clock:               clk,
-		observer:            cfg.Observer,
+		observer:            obs,
 	}
 }
 
@@ -147,7 +152,8 @@ func (r *DualSlotRotatingSigner) Start(ctx context.Context) error {
 	}
 
 	// Initialize active key cache
-	_, initProbe := r.observer.RotationCheckStarted(ctx)
+	ctx, initProbe := r.observer.RotationCheckStarted(ctx)
+	defer initProbe.End()
 	if err := r.updateActiveKeyCache(ctx, initProbe); err != nil {
 		return fmt.Errorf("failed to initialize active key cache: %w", err)
 	}

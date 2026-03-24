@@ -66,17 +66,21 @@ type Config struct {
 	ExchangeServer *ExchangeServer
 	JWKSServer     *JWKSServer
 
-	// Observer must be non-nil; use NoOpObserver{} in tests.
+	// Observer for server lifecycle events. Defaults to NoOpObserver{} if nil.
 	Observer LifecycleObserver
 }
 
 // New creates a new server with the given configuration.
 func New(cfg Config) *Server {
+	obs := cfg.Observer
+	if obs == nil {
+		obs = NoOpObserver{}
+	}
 	return &Server{
 		grpcListener:    cfg.GRPCListener,
 		httpListener:    cfg.HTTPListener,
 		grpcDialOptions: cfg.GRPCDialOptions,
-		observer:        cfg.Observer,
+		observer:        obs,
 		authzServer:     cfg.AuthzServer,
 		exchangeServer:  cfg.ExchangeServer,
 		jwksServer:      cfg.JWKSServer,
