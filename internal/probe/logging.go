@@ -11,6 +11,8 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
+var _ service.ServiceObserver = (*loggingObserver)(nil)
+
 // loggingObserver creates request-scoped logging probes.
 // Each event type has a pre-built sub-logger with its event name and
 // per-event log level baked in at construction time.

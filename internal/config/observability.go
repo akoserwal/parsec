@@ -8,11 +8,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/project-kessel/parsec/internal/datasource"
-	"github.com/project-kessel/parsec/internal/keys"
 	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/probe"
-	"github.com/project-kessel/parsec/internal/server"
 )
 
 // LoggerContext couples a zerolog logger with its destination writer so
@@ -116,28 +113,10 @@ func newLoggingObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (observe
 
 	return observer.Compose(
 		app,
-		struct {
-			datasource.CacheObserver
-			datasource.LuaObserver
-		}{
-			CacheObserver: probe.NewLoggingDataSourceCacheObserver(dcLog),
-			LuaObserver:   probe.NewLoggingLuaDataSourceObserver(luaLog),
-		},
-		struct {
-			keys.RotationObserver
-			keys.ProviderObserver
-		}{
-			RotationObserver: probe.NewLoggingKeyRotationObserver(krLog),
-			ProviderObserver: probe.NewLoggingKeyProviderObserver(kpLog),
-		},
+		probe.NewLoggingDataSourceObserver(dcLog, luaLog),
+		probe.NewLoggingKeysObserver(krLog, kpLog),
 		probe.NewLoggingTrustValidationObserver(tvLog),
-		struct {
-			server.JWKSObserver
-			server.LifecycleObserver
-		}{
-			JWKSObserver:      probe.NewLoggingJWKSObserver(jcLog),
-			LifecycleObserver: probe.NewLoggingServerLifecycleObserver(slLog),
-		},
+		probe.NewLoggingServerObserver(jcLog, slLog),
 	), nil
 }
 

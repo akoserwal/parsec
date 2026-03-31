@@ -155,45 +155,6 @@ func TestTokenService_IssueTokens_Observability(t *testing.T) {
 		)
 	})
 
-	t.Run("composite observer delegates to all observers", func(t *testing.T) {
-		// Setup multiple fake observers
-		fakeObs1 := NewFakeObserver(t)
-		fakeObs2 := NewFakeObserver(t)
-		fakeObs3 := NewFakeObserver(t)
-
-		composite := NewCompositeObserver(fakeObs1, fakeObs2, fakeObs3)
-
-		stubToken := &Token{Value: "token1", Type: string(TokenTypeTransactionToken)}
-		registry := NewSimpleRegistry()
-		registry.Register(TokenTypeTransactionToken, &testIssuerStub{token: stubToken})
-
-		service := NewTokenService("trust.example.com", nil, registry, composite)
-
-		req := &IssueRequest{
-			Subject:    &trust.Result{Subject: "user-123"},
-			TokenTypes: []TokenType{TokenTypeTransactionToken},
-		}
-
-		_, err := service.IssueTokens(ctx, req)
-		if err != nil {
-			t.Fatalf("IssueTokens failed: %v", err)
-		}
-
-		// Verify all three observers were called and each created a probe with correct sequence
-		for i, fakeObs := range []*FakeObserver{fakeObs1, fakeObs2, fakeObs3} {
-			fakeObs.AssertProbeCount(1)
-			if len(fakeObs.Probes) == 0 {
-				t.Errorf("observer %d did not create a probe", i+1)
-				continue
-			}
-			p := fakeObs.Probes[0]
-			p.AssertProbeSequence(
-				ProbeCall("TokenTypeIssuanceStarted", TokenTypeTransactionToken),
-				ProbeCall("TokenTypeIssuanceSucceeded", TokenTypeTransactionToken, stubToken),
-				"End",
-			)
-		}
-	})
 }
 
 // testIssuerStub is a simple stub issuer for testing

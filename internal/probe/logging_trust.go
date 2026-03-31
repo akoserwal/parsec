@@ -9,7 +9,10 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-var _ trust.ValidationObserver = (*LoggingTrustValidationObserver)(nil)
+var (
+	_ trust.ValidationObserver = (*LoggingTrustValidationObserver)(nil)
+	_ trust.TrustObserver      = (*LoggingTrustValidationObserver)(nil)
+)
 
 // LoggingTrustValidationObserver logs trust validation events via zerolog.
 type LoggingTrustValidationObserver struct {

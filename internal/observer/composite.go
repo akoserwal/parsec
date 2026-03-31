@@ -5,41 +5,70 @@ import (
 
 	"github.com/project-kessel/parsec/internal/datasource"
 	"github.com/project-kessel/parsec/internal/keys"
+	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
 // CompositeAll builds an Observer that fans out every call to all children.
-// ServiceObserver fan-out uses service.NewCompositeObserver (handles
-// request-scoped probes with context); infra fan-out is handled here.
 func CompositeAll(children []Observer) Observer {
 	if len(children) == 1 {
 		return children[0]
 	}
-	apps := make([]service.ServiceObserver, len(children))
-	for i, c := range children {
-		apps[i] = c
-	}
-	return &compositeAll{
-		ServiceObserver: service.NewCompositeObserver(apps...),
-		children:        children,
-	}
+	return &compositeAll{children: children}
 }
 
 type compositeAll struct {
-	service.ServiceObserver
 	children []Observer
 }
 
 // --- probe factories: each creates probes from all children and wraps them ---
+
+func (c *compositeAll) TokenIssuanceStarted(
+	ctx context.Context,
+	subject *trust.Result,
+	actor *trust.Result,
+	scope string,
+	tokenTypes []service.TokenType,
+) (context.Context, service.TokenIssuanceProbe) {
+	probes := make([]service.TokenIssuanceProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.TokenIssuanceStarted(ctx, subject, actor, scope, tokenTypes)
+	}
+	return ctx, &compositeTokenIssuanceProbe{probes: probes}
+}
+
+func (c *compositeAll) TokenExchangeStarted(
+	ctx context.Context,
+	grantType string,
+	requestedTokenType string,
+	audience string,
+	scope string,
+) (context.Context, service.TokenExchangeProbe) {
+	probes := make([]service.TokenExchangeProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.TokenExchangeStarted(ctx, grantType, requestedTokenType, audience, scope)
+	}
+	return ctx, &compositeTokenExchangeProbe{probes: probes}
+}
+
+func (c *compositeAll) AuthzCheckStarted(
+	ctx context.Context,
+) (context.Context, service.AuthzCheckProbe) {
+	probes := make([]service.AuthzCheckProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.AuthzCheckStarted(ctx)
+	}
+	return ctx, &compositeAuthzCheckProbe{probes: probes}
+}
 
 func (c *compositeAll) CacheFetchStarted(ctx context.Context, name string) (context.Context, datasource.CacheFetchProbe) {
 	probes := make([]datasource.CacheFetchProbe, len(c.children))
 	for i, ch := range c.children {
 		ctx, probes[i] = ch.CacheFetchStarted(ctx, name)
 	}
-	return ctx, &multiCacheFetchProbe{probes}
+	return ctx, &compositeCacheFetchProbe{probes}
 }
 
 func (c *compositeAll) LuaFetchStarted(ctx context.Context, name string) (context.Context, datasource.LuaFetchProbe) {
@@ -47,7 +76,7 @@ func (c *compositeAll) LuaFetchStarted(ctx context.Context, name string) (contex
 	for i, ch := range c.children {
 		ctx, probes[i] = ch.LuaFetchStarted(ctx, name)
 	}
-	return ctx, &multiLuaFetchProbe{probes}
+	return ctx, &compositeLuaFetchProbe{probes}
 }
 
 func (c *compositeAll) RotationCheckStarted(ctx context.Context) (context.Context, keys.RotationCheckProbe) {
@@ -55,7 +84,7 @@ func (c *compositeAll) RotationCheckStarted(ctx context.Context) (context.Contex
 	for i, ch := range c.children {
 		ctx, probes[i] = ch.RotationCheckStarted(ctx)
 	}
-	return ctx, &multiRotationCheckProbe{probes}
+	return ctx, &compositeRotationCheckProbe{probes}
 }
 
 func (c *compositeAll) KeyProvisionStarted(ctx context.Context) (context.Context, keys.KeyProvisionProbe) {
@@ -63,7 +92,7 @@ func (c *compositeAll) KeyProvisionStarted(ctx context.Context) (context.Context
 	for i, ch := range c.children {
 		ctx, probes[i] = ch.KeyProvisionStarted(ctx)
 	}
-	return ctx, &multiKeyProvisionProbe{probes}
+	return ctx, &compositeKeyProvisionProbe{probes}
 }
 
 func (c *compositeAll) ValidationStarted(ctx context.Context) (context.Context, trust.ValidationProbe) {
@@ -71,7 +100,7 @@ func (c *compositeAll) ValidationStarted(ctx context.Context) (context.Context, 
 	for i, ch := range c.children {
 		ctx, probes[i] = ch.ValidationStarted(ctx)
 	}
-	return ctx, &multiValidationProbe{probes}
+	return ctx, &compositeValidationProbe{probes}
 }
 
 func (c *compositeAll) CacheRefreshStarted(ctx context.Context) (context.Context, server.CacheRefreshProbe) {
@@ -79,7 +108,7 @@ func (c *compositeAll) CacheRefreshStarted(ctx context.Context) (context.Context
 	for i, ch := range c.children {
 		ctx, probes[i] = ch.CacheRefreshStarted(ctx)
 	}
-	return ctx, &multiCacheRefreshProbe{probes}
+	return ctx, &compositeCacheRefreshProbe{probes}
 }
 
 func (c *compositeAll) ServeStarted(ctx context.Context) (context.Context, server.ServeProbe) {
@@ -87,201 +116,333 @@ func (c *compositeAll) ServeStarted(ctx context.Context) (context.Context, serve
 	for i, ch := range c.children {
 		ctx, probes[i] = ch.ServeStarted(ctx)
 	}
-	return ctx, &multiServeProbe{probes}
+	return ctx, &compositeServeProbe{probes}
 }
 
 // --- composite probes: fan out each event to all children ---
 
-type multiCacheFetchProbe struct {
+type compositeCacheFetchProbe struct {
 	probes []datasource.CacheFetchProbe
 }
 
-func (m *multiCacheFetchProbe) CacheHit() {
+func (m *compositeCacheFetchProbe) CacheHit() {
 	for _, p := range m.probes {
 		p.CacheHit()
 	}
 }
-func (m *multiCacheFetchProbe) CacheMiss() {
+func (m *compositeCacheFetchProbe) CacheMiss() {
 	for _, p := range m.probes {
 		p.CacheMiss()
 	}
 }
-func (m *multiCacheFetchProbe) CacheExpired() {
+func (m *compositeCacheFetchProbe) CacheExpired() {
 	for _, p := range m.probes {
 		p.CacheExpired()
 	}
 }
-func (m *multiCacheFetchProbe) FetchFailed(err error) {
+func (m *compositeCacheFetchProbe) FetchFailed(err error) {
 	for _, p := range m.probes {
 		p.FetchFailed(err)
 	}
 }
-func (m *multiCacheFetchProbe) End() {
+func (m *compositeCacheFetchProbe) End() {
 	for _, p := range m.probes {
 		p.End()
 	}
 }
 
-type multiLuaFetchProbe struct {
+type compositeLuaFetchProbe struct {
 	probes []datasource.LuaFetchProbe
 }
 
-func (m *multiLuaFetchProbe) ScriptLoadFailed(err error) {
+func (m *compositeLuaFetchProbe) ScriptLoadFailed(err error) {
 	for _, p := range m.probes {
 		p.ScriptLoadFailed(err)
 	}
 }
-func (m *multiLuaFetchProbe) ScriptExecutionFailed(err error) {
+func (m *compositeLuaFetchProbe) ScriptExecutionFailed(err error) {
 	for _, p := range m.probes {
 		p.ScriptExecutionFailed(err)
 	}
 }
-func (m *multiLuaFetchProbe) InvalidReturnType(got string) {
+func (m *compositeLuaFetchProbe) InvalidReturnType(got string) {
 	for _, p := range m.probes {
 		p.InvalidReturnType(got)
 	}
 }
-func (m *multiLuaFetchProbe) FetchCompleted() {
+func (m *compositeLuaFetchProbe) FetchCompleted() {
 	for _, p := range m.probes {
 		p.FetchCompleted()
 	}
 }
-func (m *multiLuaFetchProbe) End() {
+func (m *compositeLuaFetchProbe) End() {
 	for _, p := range m.probes {
 		p.End()
 	}
 }
 
-type multiRotationCheckProbe struct{ probes []keys.RotationCheckProbe }
+type compositeRotationCheckProbe struct{ probes []keys.RotationCheckProbe }
 
-func (m *multiRotationCheckProbe) RotationCheckFailed(err error) {
+func (m *compositeRotationCheckProbe) RotationCheckFailed(err error) {
 	for _, p := range m.probes {
 		p.RotationCheckFailed(err)
 	}
 }
-func (m *multiRotationCheckProbe) ActiveKeyCacheUpdateFailed(err error) {
+func (m *compositeRotationCheckProbe) ActiveKeyCacheUpdateFailed(err error) {
 	for _, p := range m.probes {
 		p.ActiveKeyCacheUpdateFailed(err)
 	}
 }
-func (m *multiRotationCheckProbe) RotationCompleted(slot string) {
+func (m *compositeRotationCheckProbe) RotationCompleted(slot string) {
 	for _, p := range m.probes {
 		p.RotationCompleted(slot)
 	}
 }
-func (m *multiRotationCheckProbe) RotationSkippedVersionRace(slot string) {
+func (m *compositeRotationCheckProbe) RotationSkippedVersionRace(slot string) {
 	for _, p := range m.probes {
 		p.RotationSkippedVersionRace(slot)
 	}
 }
-func (m *multiRotationCheckProbe) KeyProviderNotFound(prov, slot string) {
+func (m *compositeRotationCheckProbe) KeyProviderNotFound(prov, slot string) {
 	for _, p := range m.probes {
 		p.KeyProviderNotFound(prov, slot)
 	}
 }
-func (m *multiRotationCheckProbe) KeyHandleFailed(slot string, err error) {
+func (m *compositeRotationCheckProbe) KeyHandleFailed(slot string, err error) {
 	for _, p := range m.probes {
 		p.KeyHandleFailed(slot, err)
 	}
 }
-func (m *multiRotationCheckProbe) PublicKeyFailed(slot string, err error) {
+func (m *compositeRotationCheckProbe) PublicKeyFailed(slot string, err error) {
 	for _, p := range m.probes {
 		p.PublicKeyFailed(slot, err)
 	}
 }
-func (m *multiRotationCheckProbe) ThumbprintFailed(slot string, err error) {
+func (m *compositeRotationCheckProbe) ThumbprintFailed(slot string, err error) {
 	for _, p := range m.probes {
 		p.ThumbprintFailed(slot, err)
 	}
 }
-func (m *multiRotationCheckProbe) MetadataFailed(slot string, err error) {
+func (m *compositeRotationCheckProbe) MetadataFailed(slot string, err error) {
 	for _, p := range m.probes {
 		p.MetadataFailed(slot, err)
 	}
 }
-func (m *multiRotationCheckProbe) End() {
+func (m *compositeRotationCheckProbe) End() {
 	for _, p := range m.probes {
 		p.End()
 	}
 }
 
-type multiKeyProvisionProbe struct{ probes []keys.KeyProvisionProbe }
+type compositeKeyProvisionProbe struct{ probes []keys.KeyProvisionProbe }
 
-func (m *multiKeyProvisionProbe) OldKeyDeletionFailed(keyID string, err error) {
+func (m *compositeKeyProvisionProbe) OldKeyDeletionFailed(keyID string, err error) {
 	for _, p := range m.probes {
 		p.OldKeyDeletionFailed(keyID, err)
 	}
 }
-func (m *multiKeyProvisionProbe) End() {
+func (m *compositeKeyProvisionProbe) End() {
 	for _, p := range m.probes {
 		p.End()
 	}
 }
 
-type multiValidationProbe struct{ probes []trust.ValidationProbe }
+type compositeValidationProbe struct{ probes []trust.ValidationProbe }
 
-func (m *multiValidationProbe) ValidatorFailed(name string, ct trust.CredentialType, err error) {
+func (m *compositeValidationProbe) ValidatorFailed(name string, ct trust.CredentialType, err error) {
 	for _, p := range m.probes {
 		p.ValidatorFailed(name, ct, err)
 	}
 }
-func (m *multiValidationProbe) AllValidatorsFailed(ct trust.CredentialType, n int, err error) {
+func (m *compositeValidationProbe) AllValidatorsFailed(ct trust.CredentialType, n int, err error) {
 	for _, p := range m.probes {
 		p.AllValidatorsFailed(ct, n, err)
 	}
 }
-func (m *multiValidationProbe) ValidatorFiltered(name, actor string) {
+func (m *compositeValidationProbe) ValidatorFiltered(name, actor string) {
 	for _, p := range m.probes {
 		p.ValidatorFiltered(name, actor)
 	}
 }
-func (m *multiValidationProbe) FilterEvaluationFailed(name string, err error) {
+func (m *compositeValidationProbe) FilterEvaluationFailed(name string, err error) {
 	for _, p := range m.probes {
 		p.FilterEvaluationFailed(name, err)
 	}
 }
-func (m *multiValidationProbe) End() {
+func (m *compositeValidationProbe) End() {
 	for _, p := range m.probes {
 		p.End()
 	}
 }
 
-type multiCacheRefreshProbe struct{ probes []server.CacheRefreshProbe }
+type compositeCacheRefreshProbe struct{ probes []server.CacheRefreshProbe }
 
-func (m *multiCacheRefreshProbe) InitialCachePopulationFailed(err error) {
+func (m *compositeCacheRefreshProbe) InitialCachePopulationFailed(err error) {
 	for _, p := range m.probes {
 		p.InitialCachePopulationFailed(err)
 	}
 }
-func (m *multiCacheRefreshProbe) CacheRefreshFailed(err error) {
+func (m *compositeCacheRefreshProbe) CacheRefreshFailed(err error) {
 	for _, p := range m.probes {
 		p.CacheRefreshFailed(err)
 	}
 }
-func (m *multiCacheRefreshProbe) KeyConversionFailed(keyID string, err error) {
+func (m *compositeCacheRefreshProbe) KeyConversionFailed(keyID string, err error) {
 	for _, p := range m.probes {
 		p.KeyConversionFailed(keyID, err)
 	}
 }
-func (m *multiCacheRefreshProbe) End() {
+func (m *compositeCacheRefreshProbe) End() {
 	for _, p := range m.probes {
 		p.End()
 	}
 }
 
-type multiServeProbe struct{ probes []server.ServeProbe }
+type compositeServeProbe struct{ probes []server.ServeProbe }
 
-func (m *multiServeProbe) GRPCServeFailed(err error) {
+func (m *compositeServeProbe) GRPCServeFailed(err error) {
 	for _, p := range m.probes {
 		p.GRPCServeFailed(err)
 	}
 }
-func (m *multiServeProbe) HTTPServeFailed(err error) {
+func (m *compositeServeProbe) HTTPServeFailed(err error) {
 	for _, p := range m.probes {
 		p.HTTPServeFailed(err)
 	}
 }
-func (m *multiServeProbe) End() {
+func (m *compositeServeProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type compositeTokenIssuanceProbe struct {
+	probes []service.TokenIssuanceProbe
+}
+
+func (m *compositeTokenIssuanceProbe) TokenTypeIssuanceStarted(tokenType service.TokenType) {
+	for _, p := range m.probes {
+		p.TokenTypeIssuanceStarted(tokenType)
+	}
+}
+
+func (m *compositeTokenIssuanceProbe) TokenTypeIssuanceSucceeded(tokenType service.TokenType, token *service.Token) {
+	for _, p := range m.probes {
+		p.TokenTypeIssuanceSucceeded(tokenType, token)
+	}
+}
+
+func (m *compositeTokenIssuanceProbe) TokenTypeIssuanceFailed(tokenType service.TokenType, err error) {
+	for _, p := range m.probes {
+		p.TokenTypeIssuanceFailed(tokenType, err)
+	}
+}
+
+func (m *compositeTokenIssuanceProbe) IssuerNotFound(tokenType service.TokenType, err error) {
+	for _, p := range m.probes {
+		p.IssuerNotFound(tokenType, err)
+	}
+}
+
+func (m *compositeTokenIssuanceProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type compositeTokenExchangeProbe struct {
+	probes []service.TokenExchangeProbe
+}
+
+func (m *compositeTokenExchangeProbe) ActorValidationSucceeded(actor *trust.Result) {
+	for _, p := range m.probes {
+		p.ActorValidationSucceeded(actor)
+	}
+}
+
+func (m *compositeTokenExchangeProbe) ActorValidationFailed(err error) {
+	for _, p := range m.probes {
+		p.ActorValidationFailed(err)
+	}
+}
+
+func (m *compositeTokenExchangeProbe) RequestContextParsed(attrs *request.RequestAttributes) {
+	for _, p := range m.probes {
+		p.RequestContextParsed(attrs)
+	}
+}
+
+func (m *compositeTokenExchangeProbe) RequestContextParseFailed(err error) {
+	for _, p := range m.probes {
+		p.RequestContextParseFailed(err)
+	}
+}
+
+func (m *compositeTokenExchangeProbe) SubjectTokenValidationSucceeded(subject *trust.Result) {
+	for _, p := range m.probes {
+		p.SubjectTokenValidationSucceeded(subject)
+	}
+}
+
+func (m *compositeTokenExchangeProbe) SubjectTokenValidationFailed(err error) {
+	for _, p := range m.probes {
+		p.SubjectTokenValidationFailed(err)
+	}
+}
+
+func (m *compositeTokenExchangeProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type compositeAuthzCheckProbe struct {
+	probes []service.AuthzCheckProbe
+}
+
+func (m *compositeAuthzCheckProbe) RequestAttributesParsed(attrs *request.RequestAttributes) {
+	for _, p := range m.probes {
+		p.RequestAttributesParsed(attrs)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) ActorValidationSucceeded(actor *trust.Result) {
+	for _, p := range m.probes {
+		p.ActorValidationSucceeded(actor)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) ActorValidationFailed(err error) {
+	for _, p := range m.probes {
+		p.ActorValidationFailed(err)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) SubjectCredentialExtracted(cred trust.Credential, headersUsed []string) {
+	for _, p := range m.probes {
+		p.SubjectCredentialExtracted(cred, headersUsed)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) SubjectCredentialExtractionFailed(err error) {
+	for _, p := range m.probes {
+		p.SubjectCredentialExtractionFailed(err)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) SubjectValidationSucceeded(subject *trust.Result) {
+	for _, p := range m.probes {
+		p.SubjectValidationSucceeded(subject)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) SubjectValidationFailed(err error) {
+	for _, p := range m.probes {
+		p.SubjectValidationFailed(err)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) End() {
 	for _, p := range m.probes {
 		p.End()
 	}

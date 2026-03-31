@@ -249,6 +249,60 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 	}
 }
 
+func TestCompositeAll_FansOutServiceTypes(t *testing.T) {
+	var (
+		tokenIss1, tokenIss2   atomic.Int32
+		tokenExch1, tokenExch2 atomic.Int32
+		authz1, authz2         atomic.Int32
+	)
+
+	child1 := Compose(
+		&spyServiceObserver{
+			tokenIssuanceCalled: &tokenIss1,
+			tokenExchangeCalled: &tokenExch1,
+			authzCheckCalled:    &authz1,
+		},
+		datasource.NoOpObserver{},
+		keys.NoOpObserver{},
+		trust.NoOpObserver{},
+		server.NoOpObserver{},
+	)
+	child2 := Compose(
+		&spyServiceObserver{
+			tokenIssuanceCalled: &tokenIss2,
+			tokenExchangeCalled: &tokenExch2,
+			authzCheckCalled:    &authz2,
+		},
+		datasource.NoOpObserver{},
+		keys.NoOpObserver{},
+		trust.NoOpObserver{},
+		server.NoOpObserver{},
+	)
+
+	composite := CompositeAll([]Observer{child1, child2})
+	ctx := context.Background()
+
+	composite.TokenIssuanceStarted(ctx, nil, nil, "", nil)
+	composite.TokenExchangeStarted(ctx, "", "", "", "")
+	composite.AuthzCheckStarted(ctx)
+
+	for _, tc := range []struct {
+		name   string
+		c1, c2 *atomic.Int32
+	}{
+		{"TokenIssuance", &tokenIss1, &tokenIss2},
+		{"TokenExchange", &tokenExch1, &tokenExch2},
+		{"AuthzCheck", &authz1, &authz2},
+	} {
+		if tc.c1.Load() != 1 {
+			t.Errorf("%s: child1 expected 1 call, got %d", tc.name, tc.c1.Load())
+		}
+		if tc.c2.Load() != 1 {
+			t.Errorf("%s: child2 expected 1 call, got %d", tc.name, tc.c2.Load())
+		}
+	}
+}
+
 func TestCompositeAll_MultiProbe_FansOutEvents(t *testing.T) {
 	var hits1, hits2 atomic.Int32
 
@@ -349,4 +403,26 @@ type spySrvLifeObserver struct{ called *atomic.Int32 }
 func (s *spySrvLifeObserver) ServeStarted(_ context.Context) (context.Context, server.ServeProbe) {
 	s.called.Add(1)
 	return server.NoOpObserver{}.ServeStarted(context.Background())
+}
+
+type spyServiceObserver struct {
+	service.NoOpServiceObserver
+	tokenIssuanceCalled *atomic.Int32
+	tokenExchangeCalled *atomic.Int32
+	authzCheckCalled    *atomic.Int32
+}
+
+func (s *spyServiceObserver) TokenIssuanceStarted(ctx context.Context, _ *trust.Result, _ *trust.Result, _ string, _ []service.TokenType) (context.Context, service.TokenIssuanceProbe) {
+	s.tokenIssuanceCalled.Add(1)
+	return ctx, &service.NoOpTokenIssuanceProbe{}
+}
+
+func (s *spyServiceObserver) TokenExchangeStarted(ctx context.Context, _ string, _ string, _ string, _ string) (context.Context, service.TokenExchangeProbe) {
+	s.tokenExchangeCalled.Add(1)
+	return ctx, &service.NoOpTokenExchangeProbe{}
+}
+
+func (s *spyServiceObserver) AuthzCheckStarted(ctx context.Context) (context.Context, service.AuthzCheckProbe) {
+	s.authzCheckCalled.Add(1)
+	return ctx, &service.NoOpAuthzCheckProbe{}
 }
