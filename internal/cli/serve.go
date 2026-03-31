@@ -8,56 +8,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/project-kessel/parsec/internal/config"
 	"github.com/project-kessel/parsec/internal/server"
-	"github.com/project-kessel/parsec/internal/service"
-	"github.com/project-kessel/parsec/internal/trust"
 )
-
-type runtimeComponents struct {
-	trustStore           trust.Store
-	tokenService         *service.TokenService
-	authzTokenTypes      []server.TokenTypeSpec
-	claimsFilterRegistry server.ClaimsFilterRegistry
-	issuerRegistry       service.Registry
-}
-
-func buildRuntimeComponents(provider *config.Provider) (*runtimeComponents, error) {
-	trustStore, err := provider.TrustStore()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create trust store: %w", err)
-	}
-
-	tokenService, err := provider.TokenService()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create token service: %w", err)
-	}
-
-	authzTokenTypes, err := provider.AuthzServerTokenTypes()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get authz token types: %w", err)
-	}
-
-	claimsFilterRegistry, err := provider.ExchangeServerClaimsFilterRegistry()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get exchange server claims filter registry: %w", err)
-	}
-
-	issuerRegistry, err := provider.IssuerRegistry()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get issuer registry: %w", err)
-	}
-
-	return &runtimeComponents{
-		trustStore:           trustStore,
-		tokenService:         tokenService,
-		authzTokenTypes:      authzTokenTypes,
-		claimsFilterRegistry: claimsFilterRegistry,
-		issuerRegistry:       issuerRegistry,
-	}, nil
-}
 
 // NewServeCmd creates the serve command
 func NewServeCmd() *cobra.Command {
@@ -105,6 +61,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	bootstrapLog := zerolog.New(os.Stdout).With().Timestamp().Logger()
+
 	// 1. Determine config file path
 	configPath := configFile
 	if configPath == "" {
@@ -122,40 +80,53 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	// 3. Create provider (lazily builds logger and observer from config)
+	// 3. Create provider and build components
 	provider := config.NewProvider(cfg)
 
-	logger, err := provider.Logger()
-	if err != nil {
-		return fmt.Errorf("invalid observability config: %w", err)
-	}
-
-	obs, err := provider.Observer()
+	logger, err := provider.Observer()
 	if err != nil {
 		return fmt.Errorf("failed to create observer: %w", err)
 	}
 
-	// 4. Build components via provider
-	components, err := buildRuntimeComponents(provider)
+	trustStore, err := provider.TrustStore()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create trust store: %w", err)
 	}
 
-	// 5. Create service handlers — all receive the central observer
-	authzServer := server.NewAuthzServer(components.trustStore, components.tokenService, components.authzTokenTypes, obs)
-	exchangeServer := server.NewExchangeServer(components.trustStore, components.tokenService, components.claimsFilterRegistry, obs)
+	tokenService, err := provider.TokenService()
+	if err != nil {
+		return fmt.Errorf("failed to create token service: %w", err)
+	}
+
+	authzTokenTypes, err := provider.AuthzServerTokenTypes()
+	if err != nil {
+		return fmt.Errorf("failed to get authz token types: %w", err)
+	}
+
+	claimsFilterRegistry, err := provider.ExchangeServerClaimsFilterRegistry()
+	if err != nil {
+		return fmt.Errorf("failed to create claims filter registry: %w", err)
+	}
+
+	issuerRegistry, err := provider.IssuerRegistry()
+	if err != nil {
+		return fmt.Errorf("failed to create issuer registry: %w", err)
+	}
+
+	// 4. Create service handlers
+	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, logger)
+	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, logger)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
-		IssuerRegistry: components.issuerRegistry,
-		Observer:       obs,
+		IssuerRegistry: issuerRegistry,
+		Observer:       logger,
 	})
 
-	// Start JWKS background refresh
 	if err := jwksServer.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start JWKS server: %w", err)
 	}
 	defer jwksServer.Stop()
 
-	// 6. Create TCP listeners from configured ports
+	// 5. Create TCP listeners
 	grpcListener, err := net.Listen("tcp", fmt.Sprintf(":%d", provider.GRPCPort()))
 	if err != nil {
 		return fmt.Errorf("failed to listen on gRPC port %d: %w", provider.GRPCPort(), err)
@@ -168,25 +139,24 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = httpListener.Close() }()
 
-	// 7. Create and start server
+	// 6. Create and start server
 	srv := server.New(server.Config{
 		GRPCListener:   grpcListener,
 		HTTPListener:   httpListener,
 		AuthzServer:    authzServer,
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
-		Observer:       obs,
+		Observer:       logger,
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
 	}
 
-	// 7a. All components initialized — signal readiness via gRPC health service.
 	srv.SetReady()
 
 	grpcAddr := grpcListener.Addr().String()
 	httpAddr := httpListener.Addr().String()
-	logger.Info().
+	bootstrapLog.Info().
 		Str("grpc_addr", grpcAddr).
 		Str("http_addr", httpAddr).
 		Str("token_exchange_url", "http://"+httpAddr+"/v1/token").
@@ -197,18 +167,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Str("config", configPath).
 		Msg("parsec is running")
 
-	// 8. Wait for interrupt signal
+	// 7. Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	<-sigCh
 
-	logger.Info().Msg("Shutting down")
+	bootstrapLog.Info().Msg("Shutting down")
 
-	// 9. Graceful shutdown
+	// 8. Graceful shutdown
 	if err := srv.Stop(ctx); err != nil {
 		return fmt.Errorf("error during shutdown: %w", err)
 	}
 
-	logger.Info().Msg("Shutdown complete")
+	bootstrapLog.Info().Msg("Shutdown complete")
 	return nil
 }
