@@ -12,6 +12,7 @@ import (
 var _ datasource.LuaObserver = (*LoggingLuaDataSourceObserver)(nil)
 
 type LoggingLuaDataSourceObserver struct {
+	datasource.NoOpLuaObserver
 	logger zerolog.Logger
 }
 

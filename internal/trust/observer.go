@@ -38,12 +38,18 @@ func (NoOpValidationProbe) ValidatorFiltered(string, string)               {}
 func (NoOpValidationProbe) FilterEvaluationFailed(string, error)           {}
 func (NoOpValidationProbe) End()                                           {}
 
+// NoOpValidationObserver is a no-op implementation of ValidationObserver.
+// Embed this in concrete observer types for forward compatibility.
+type NoOpValidationObserver struct{}
+
+func (NoOpValidationObserver) ValidationStarted(ctx context.Context) (context.Context, ValidationProbe) {
+	return ctx, NoOpValidationProbe{}
+}
+
 // NoOpObserver satisfies ValidationObserver with empty probes.
 // Useful in tests that don't care about observer events.
-type NoOpObserver struct{}
-
-func (NoOpObserver) ValidationStarted(ctx context.Context) (context.Context, ValidationProbe) {
-	return ctx, NoOpValidationProbe{}
+type NoOpObserver struct {
+	NoOpValidationObserver
 }
 
 var _ TrustObserver = NoOpObserver{}

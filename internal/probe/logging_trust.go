@@ -13,6 +13,7 @@ var _ trust.ValidationObserver = (*LoggingTrustValidationObserver)(nil)
 
 // LoggingTrustValidationObserver logs trust validation events via zerolog.
 type LoggingTrustValidationObserver struct {
+	trust.NoOpValidationObserver
 	logger zerolog.Logger
 }
 

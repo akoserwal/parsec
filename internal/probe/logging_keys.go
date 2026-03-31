@@ -16,6 +16,7 @@ var (
 
 // LoggingKeyRotationObserver logs key rotation lifecycle events via zerolog.
 type LoggingKeyRotationObserver struct {
+	keys.NoOpRotationObserver
 	logger zerolog.Logger
 }
 
@@ -80,6 +81,7 @@ func (p *loggingRotationCheckProbe) End() {
 
 // LoggingKeyProviderObserver logs key provider lifecycle events via zerolog.
 type LoggingKeyProviderObserver struct {
+	keys.NoOpProviderObserver
 	logger zerolog.Logger
 }
 

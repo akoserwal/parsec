@@ -13,6 +13,7 @@ var _ server.LifecycleObserver = (*LoggingServerLifecycleObserver)(nil)
 
 // LoggingServerLifecycleObserver logs server lifecycle events via zerolog.
 type LoggingServerLifecycleObserver struct {
+	server.NoOpLifecycleObserver
 	logger zerolog.Logger
 }
 

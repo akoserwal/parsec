@@ -68,15 +68,26 @@ func (NoOpLuaFetchProbe) InvalidReturnType(string)    {}
 func (NoOpLuaFetchProbe) FetchCompleted()             {}
 func (NoOpLuaFetchProbe) End()                        {}
 
-// NoOpObserver satisfies both datasource observer interfaces with empty probes.
-type NoOpObserver struct{}
+// NoOpCacheObserver is a no-op implementation of CacheObserver.
+// Embed this in concrete observer types for forward compatibility.
+type NoOpCacheObserver struct{}
 
-func (NoOpObserver) CacheFetchStarted(ctx context.Context, _ string) (context.Context, CacheFetchProbe) {
+func (NoOpCacheObserver) CacheFetchStarted(ctx context.Context, _ string) (context.Context, CacheFetchProbe) {
 	return ctx, NoOpCacheFetchProbe{}
 }
 
-func (NoOpObserver) LuaFetchStarted(ctx context.Context, _ string) (context.Context, LuaFetchProbe) {
+// NoOpLuaObserver is a no-op implementation of LuaObserver.
+// Embed this in concrete observer types for forward compatibility.
+type NoOpLuaObserver struct{}
+
+func (NoOpLuaObserver) LuaFetchStarted(ctx context.Context, _ string) (context.Context, LuaFetchProbe) {
 	return ctx, NoOpLuaFetchProbe{}
+}
+
+// NoOpObserver satisfies both datasource observer interfaces with empty probes.
+type NoOpObserver struct {
+	NoOpCacheObserver
+	NoOpLuaObserver
 }
 
 var _ DataSourceObserver = NoOpObserver{}

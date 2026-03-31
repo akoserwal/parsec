@@ -72,16 +72,27 @@ type NoOpKeyProvisionProbe struct{}
 func (NoOpKeyProvisionProbe) OldKeyDeletionFailed(string, error) {}
 func (NoOpKeyProvisionProbe) End()                               {}
 
-// NoOpObserver satisfies both RotationObserver and ProviderObserver
-// with empty probes. Useful in tests that don't care about observer events.
-type NoOpObserver struct{}
+// NoOpRotationObserver is a no-op implementation of RotationObserver.
+// Embed this in concrete observer types for forward compatibility.
+type NoOpRotationObserver struct{}
 
-func (NoOpObserver) RotationCheckStarted(ctx context.Context) (context.Context, RotationCheckProbe) {
+func (NoOpRotationObserver) RotationCheckStarted(ctx context.Context) (context.Context, RotationCheckProbe) {
 	return ctx, NoOpRotationCheckProbe{}
 }
 
-func (NoOpObserver) KeyProvisionStarted(ctx context.Context) (context.Context, KeyProvisionProbe) {
+// NoOpProviderObserver is a no-op implementation of ProviderObserver.
+// Embed this in concrete observer types for forward compatibility.
+type NoOpProviderObserver struct{}
+
+func (NoOpProviderObserver) KeyProvisionStarted(ctx context.Context) (context.Context, KeyProvisionProbe) {
 	return ctx, NoOpKeyProvisionProbe{}
+}
+
+// NoOpObserver satisfies both RotationObserver and ProviderObserver
+// with empty probes. Useful in tests that don't care about observer events.
+type NoOpObserver struct {
+	NoOpRotationObserver
+	NoOpProviderObserver
 }
 
 var _ KeysObserver = NoOpObserver{}

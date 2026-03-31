@@ -62,16 +62,27 @@ func (NoOpServeProbe) GRPCServeFailed(error) {}
 func (NoOpServeProbe) HTTPServeFailed(error) {}
 func (NoOpServeProbe) End()                  {}
 
-// NoOpObserver satisfies both JWKSObserver and LifecycleObserver
-// with empty probes. Useful in tests that don't care about observer events.
-type NoOpObserver struct{}
+// NoOpJWKSObserver is a no-op implementation of JWKSObserver.
+// Embed this in concrete observer types for forward compatibility.
+type NoOpJWKSObserver struct{}
 
-func (NoOpObserver) CacheRefreshStarted(ctx context.Context) (context.Context, CacheRefreshProbe) {
+func (NoOpJWKSObserver) CacheRefreshStarted(ctx context.Context) (context.Context, CacheRefreshProbe) {
 	return ctx, NoOpCacheRefreshProbe{}
 }
 
-func (NoOpObserver) ServeStarted(ctx context.Context) (context.Context, ServeProbe) {
+// NoOpLifecycleObserver is a no-op implementation of LifecycleObserver.
+// Embed this in concrete observer types for forward compatibility.
+type NoOpLifecycleObserver struct{}
+
+func (NoOpLifecycleObserver) ServeStarted(ctx context.Context) (context.Context, ServeProbe) {
 	return ctx, NoOpServeProbe{}
+}
+
+// NoOpObserver satisfies both JWKSObserver and LifecycleObserver
+// with empty probes. Useful in tests that don't care about observer events.
+type NoOpObserver struct {
+	NoOpJWKSObserver
+	NoOpLifecycleObserver
 }
 
 var _ ServerObserver = NoOpObserver{}

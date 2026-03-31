@@ -13,6 +13,7 @@ var _ server.JWKSObserver = (*LoggingJWKSObserver)(nil)
 
 // LoggingJWKSObserver logs JWKS cache lifecycle events via zerolog.
 type LoggingJWKSObserver struct {
+	server.NoOpJWKSObserver
 	logger zerolog.Logger
 }
 

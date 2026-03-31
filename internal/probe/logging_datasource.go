@@ -13,6 +13,7 @@ var _ datasource.CacheObserver = (*LoggingDataSourceCacheObserver)(nil)
 
 // LoggingDataSourceCacheObserver logs data source cache events via zerolog.
 type LoggingDataSourceCacheObserver struct {
+	datasource.NoOpCacheObserver
 	logger zerolog.Logger
 }
 
