@@ -34,7 +34,7 @@ func NewObserver(cfg *ObservabilityConfig) (observer.Observer, error) {
 
 // NewObserverWithLogger creates the central observer using the provided logger.
 // Use this when you want the observer to share a logger with other components.
-// The returned Observer satisfies both ApplicationObserver and all infra
+// The returned Observer satisfies both ServiceObserver and all infra
 // observer interfaces (cache, keys, trust, JWKS, server lifecycle).
 func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (observer.Observer, error) {
 	if cfg == nil {

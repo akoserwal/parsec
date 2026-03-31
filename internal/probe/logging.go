@@ -15,7 +15,7 @@ import (
 // Each event type has a pre-built sub-logger with its event name and
 // per-event log level baked in at construction time.
 type loggingObserver struct {
-	service.NoOpApplicationObserver
+	service.NoOpServiceObserver
 	tokenIssuanceLogger zerolog.Logger
 	tokenExchangeLogger zerolog.Logger
 	authzCheckLogger    zerolog.Logger
@@ -32,7 +32,7 @@ type LoggingObserverConfig struct {
 
 // NewLoggingObserver creates an application observer that logs all observability events
 // using structured logging with zerolog. All events inherit the base logger's level.
-func NewLoggingObserver(logger zerolog.Logger) service.ApplicationObserver {
+func NewLoggingObserver(logger zerolog.Logger) service.ServiceObserver {
 	return NewLoggingObserverWithConfig(LoggingObserverConfig{
 		TokenIssuanceLogger: logger.With().Str("event", "token_issuance").Logger(),
 		TokenExchangeLogger: logger.With().Str("event", "token_exchange").Logger(),
@@ -41,7 +41,7 @@ func NewLoggingObserver(logger zerolog.Logger) service.ApplicationObserver {
 }
 
 // NewLoggingObserverWithConfig creates a logging observer with pre-configured per-event loggers.
-func NewLoggingObserverWithConfig(cfg LoggingObserverConfig) service.ApplicationObserver {
+func NewLoggingObserverWithConfig(cfg LoggingObserverConfig) service.ServiceObserver {
 	return &loggingObserver{
 		tokenIssuanceLogger: cfg.TokenIssuanceLogger,
 		tokenExchangeLogger: cfg.TokenExchangeLogger,

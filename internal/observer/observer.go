@@ -14,12 +14,12 @@ import (
 // — not this central type.
 //
 // An Observer value is assignable to any narrower per-package or per-operation
-// observer interface (e.g. service.ApplicationObserver, datasource.CacheObserver,
+// observer interface (e.g. service.ServiceObserver, datasource.CacheObserver,
 // keys.RotationObserver) via Go structural typing.
 //
 // Config reload logging is intentionally excluded from the Observer interface.
 type Observer interface {
-	service.ApplicationObserver
+	service.ServiceObserver
 	datasource.DataSourceObserver
 	keys.KeysObserver
 	trust.TrustObserver
@@ -29,7 +29,7 @@ type Observer interface {
 // composed holds per-package aggregate observers and satisfies Observer
 // by promoting all embedded interface methods.
 type composed struct {
-	service.ApplicationObserver
+	service.ServiceObserver
 	datasource.DataSourceObserver
 	keys.KeysObserver
 	trust.TrustObserver
@@ -38,18 +38,18 @@ type composed struct {
 
 // Compose builds an Observer from per-package aggregate observers.
 func Compose(
-	app service.ApplicationObserver,
+	app service.ServiceObserver,
 	ds datasource.DataSourceObserver,
 	ks keys.KeysObserver,
 	ts trust.TrustObserver,
 	srv server.ServerObserver,
 ) Observer {
 	return &composed{
-		ApplicationObserver: app,
-		DataSourceObserver:  ds,
-		KeysObserver:        ks,
-		TrustObserver:       ts,
-		ServerObserver:      srv,
+		ServiceObserver:    app,
+		DataSourceObserver: ds,
+		KeysObserver:       ks,
+		TrustObserver:      ts,
+		ServerObserver:     srv,
 	}
 }
 
@@ -70,7 +70,7 @@ type (
 // noopObserver satisfies Observer by embedding per-package NoOp types.
 // All 10 methods are promoted automatically — no hand-written forwarding needed.
 type noopObserver struct {
-	service.NoOpApplicationObserver
+	service.NoOpServiceObserver
 	noopDatasource
 	noopKeys
 	noopTrust

@@ -11,24 +11,24 @@ import (
 )
 
 // CompositeAll builds an Observer that fans out every call to all children.
-// ApplicationObserver fan-out uses service.NewCompositeObserver (handles
+// ServiceObserver fan-out uses service.NewCompositeObserver (handles
 // request-scoped probes with context); infra fan-out is handled here.
 func CompositeAll(children []Observer) Observer {
 	if len(children) == 1 {
 		return children[0]
 	}
-	apps := make([]service.ApplicationObserver, len(children))
+	apps := make([]service.ServiceObserver, len(children))
 	for i, c := range children {
 		apps[i] = c
 	}
 	return &compositeAll{
-		ApplicationObserver: service.NewCompositeObserver(apps...),
-		children:            children,
+		ServiceObserver: service.NewCompositeObserver(apps...),
+		children:        children,
 	}
 }
 
 type compositeAll struct {
-	service.ApplicationObserver
+	service.ServiceObserver
 	children []Observer
 }
 

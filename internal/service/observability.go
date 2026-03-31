@@ -111,10 +111,10 @@ type AuthzCheckProbe interface {
 	End()
 }
 
-// ApplicationObserver provides a unified interface for all observability concerns in the application.
+// ServiceObserver provides a unified interface for all observability concerns in the application.
 // Concrete implementations can implement all three interfaces in a single type.
 // Implementations can embed the NoOp* types to get default behavior for methods they don't care about.
-type ApplicationObserver interface {
+type ServiceObserver interface {
 	TokenServiceObserver
 	TokenExchangeObserver
 	AuthzCheckObserver
@@ -123,12 +123,12 @@ type ApplicationObserver interface {
 // compositeObserver delegates to multiple observers in order.
 // Useful for combining logging, metrics, and tracing.
 type compositeObserver struct {
-	observers []ApplicationObserver
+	observers []ServiceObserver
 }
 
 // NewCompositeObserver creates an observer that delegates to multiple observers.
 // Observers are called in the order provided.
-func NewCompositeObserver(observers ...ApplicationObserver) ApplicationObserver {
+func NewCompositeObserver(observers ...ServiceObserver) ServiceObserver {
 	return &compositeObserver{observers: observers}
 }
 
@@ -342,39 +342,39 @@ func (n *NoOpAuthzCheckProbe) SubjectValidationSucceeded(subject *trust.Result) 
 func (n *NoOpAuthzCheckProbe) SubjectValidationFailed(err error)                {}
 func (n *NoOpAuthzCheckProbe) End()                                             {}
 
-// NoOpApplicationObserver implements ApplicationObserver with no-op behavior.
+// NoOpServiceObserver implements ServiceObserver with no-op behavior.
 // Use this as a default when no observability is needed.
-type NoOpApplicationObserver struct{}
+type NoOpServiceObserver struct{}
 
 // NoOpTokenServiceObserver returns an observer that does nothing.
 // Use this as a default when no observability is needed.
 func NoOpTokenServiceObserver() TokenServiceObserver {
-	return &NoOpApplicationObserver{}
+	return &NoOpServiceObserver{}
 }
 
 // NoOpTokenExchangeObserver returns an observer that does nothing.
 func NoOpTokenExchangeObserver() TokenExchangeObserver {
-	return &NoOpApplicationObserver{}
+	return &NoOpServiceObserver{}
 }
 
 // NoOpAuthzCheckObserver returns an observer that does nothing.
 func NoOpAuthzCheckObserver() AuthzCheckObserver {
-	return &NoOpApplicationObserver{}
+	return &NoOpServiceObserver{}
 }
 
 // NoOpObserver returns an application observer that does nothing.
-func NoOpObserver() ApplicationObserver {
-	return &NoOpApplicationObserver{}
+func NoOpObserver() ServiceObserver {
+	return &NoOpServiceObserver{}
 }
 
-func (n *NoOpApplicationObserver) TokenIssuanceStarted(ctx context.Context, subject *trust.Result, actor *trust.Result, scope string, tokenTypes []TokenType) (context.Context, TokenIssuanceProbe) {
+func (n *NoOpServiceObserver) TokenIssuanceStarted(ctx context.Context, subject *trust.Result, actor *trust.Result, scope string, tokenTypes []TokenType) (context.Context, TokenIssuanceProbe) {
 	return ctx, &NoOpTokenIssuanceProbe{}
 }
 
-func (n *NoOpApplicationObserver) TokenExchangeStarted(ctx context.Context, grantType string, requestedTokenType string, audience string, scope string) (context.Context, TokenExchangeProbe) {
+func (n *NoOpServiceObserver) TokenExchangeStarted(ctx context.Context, grantType string, requestedTokenType string, audience string, scope string) (context.Context, TokenExchangeProbe) {
 	return ctx, &NoOpTokenExchangeProbe{}
 }
 
-func (n *NoOpApplicationObserver) AuthzCheckStarted(ctx context.Context) (context.Context, AuthzCheckProbe) {
+func (n *NoOpServiceObserver) AuthzCheckStarted(ctx context.Context) (context.Context, AuthzCheckProbe) {
 	return ctx, &NoOpAuthzCheckProbe{}
 }
