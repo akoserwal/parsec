@@ -25,7 +25,11 @@ type LoggerContext struct {
 // NewObserver creates the central observer from configuration.
 // This is a convenience wrapper that creates its own logger from cfg.
 func NewObserver(cfg *ObservabilityConfig) (observer.Observer, error) {
-	return NewObserverWithLogger(cfg, NewLoggerContext(cfg))
+	logCtx, err := NewLoggerContext(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return NewObserverWithLogger(cfg, logCtx)
 }
 
 // NewObserverWithLogger creates the central observer using the provided logger.
@@ -39,7 +43,7 @@ func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (obse
 
 	switch cfg.Type {
 	case "logging":
-		return newLoggingObserver(cfg, logCtx), nil
+		return newLoggingObserver(cfg, logCtx)
 	case "noop", "":
 		return observer.NoOp(), nil
 	case "composite":
@@ -50,15 +54,64 @@ func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (obse
 }
 
 // NewLogger creates a structured zerolog logger from the observability configuration.
-func NewLogger(cfg *ObservabilityConfig) zerolog.Logger {
-	return NewLoggerContext(cfg).Logger
+func NewLogger(cfg *ObservabilityConfig) (zerolog.Logger, error) {
+	logCtx, err := NewLoggerContext(cfg)
+	if err != nil {
+		return zerolog.Logger{}, err
+	}
+	return logCtx.Logger, nil
 }
 
-func newLoggingObserver(cfg *ObservabilityConfig, logCtx LoggerContext) observer.Observer {
+func newLoggingObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (observer.Observer, error) {
+	el := func(name string, ecfg *EventLoggingConfig) (zerolog.Logger, error) {
+		return EventLogger(logCtx, name, ecfg)
+	}
+
+	tiLog, err := el("token_issuance", cfg.TokenIssuance)
+	if err != nil {
+		return nil, err
+	}
+	teLog, err := el("token_exchange", cfg.TokenExchange)
+	if err != nil {
+		return nil, err
+	}
+	acLog, err := el("authz_check", cfg.AuthzCheck)
+	if err != nil {
+		return nil, err
+	}
+	dcLog, err := el("datasource_cache", cfg.DataSourceCache)
+	if err != nil {
+		return nil, err
+	}
+	luaLog, err := el("lua_datasource", cfg.LuaDataSource)
+	if err != nil {
+		return nil, err
+	}
+	krLog, err := el("key_rotation", cfg.KeyRotation)
+	if err != nil {
+		return nil, err
+	}
+	kpLog, err := el("key_provider", cfg.KeyProvider)
+	if err != nil {
+		return nil, err
+	}
+	tvLog, err := el("trust_validation", cfg.TrustValidation)
+	if err != nil {
+		return nil, err
+	}
+	jcLog, err := el("jwks_cache", cfg.JWKSCache)
+	if err != nil {
+		return nil, err
+	}
+	slLog, err := el("server_lifecycle", cfg.ServerLifecycle)
+	if err != nil {
+		return nil, err
+	}
+
 	app := probe.NewLoggingObserverWithConfig(probe.LoggingObserverConfig{
-		TokenIssuanceLogger: EventLogger(logCtx, "token_issuance", cfg.TokenIssuance),
-		TokenExchangeLogger: EventLogger(logCtx, "token_exchange", cfg.TokenExchange),
-		AuthzCheckLogger:    EventLogger(logCtx, "authz_check", cfg.AuthzCheck),
+		TokenIssuanceLogger: tiLog,
+		TokenExchangeLogger: teLog,
+		AuthzCheckLogger:    acLog,
 	})
 
 	return observer.Compose(
@@ -67,45 +120,51 @@ func newLoggingObserver(cfg *ObservabilityConfig, logCtx LoggerContext) observer
 			datasource.CacheObserver
 			datasource.LuaObserver
 		}{
-			CacheObserver: probe.NewLoggingDataSourceCacheObserver(EventLogger(logCtx, "datasource_cache", cfg.DataSourceCache)),
-			LuaObserver:   probe.NewLoggingLuaDataSourceObserver(EventLogger(logCtx, "lua_datasource", cfg.LuaDataSource)),
+			CacheObserver: probe.NewLoggingDataSourceCacheObserver(dcLog),
+			LuaObserver:   probe.NewLoggingLuaDataSourceObserver(luaLog),
 		},
 		struct {
 			keys.RotationObserver
 			keys.ProviderObserver
 		}{
-			RotationObserver: probe.NewLoggingKeyRotationObserver(EventLogger(logCtx, "key_rotation", cfg.KeyRotation)),
-			ProviderObserver: probe.NewLoggingKeyProviderObserver(EventLogger(logCtx, "key_provider", cfg.KeyProvider)),
+			RotationObserver: probe.NewLoggingKeyRotationObserver(krLog),
+			ProviderObserver: probe.NewLoggingKeyProviderObserver(kpLog),
 		},
-		probe.NewLoggingTrustValidationObserver(EventLogger(logCtx, "trust_validation", cfg.TrustValidation)),
+		probe.NewLoggingTrustValidationObserver(tvLog),
 		struct {
 			server.JWKSObserver
 			server.LifecycleObserver
 		}{
-			JWKSObserver:      probe.NewLoggingJWKSObserver(EventLogger(logCtx, "jwks_cache", cfg.JWKSCache)),
-			LifecycleObserver: probe.NewLoggingServerLifecycleObserver(EventLogger(logCtx, "server_lifecycle", cfg.ServerLifecycle)),
+			JWKSObserver:      probe.NewLoggingJWKSObserver(jcLog),
+			LifecycleObserver: probe.NewLoggingServerLifecycleObserver(slLog),
 		},
-	)
+	), nil
 }
 
 // NewLoggerContext creates a structured zerolog logger and the writer used as
 // its sink. Writer holds the raw destination (e.g. os.Stdout), never a
 // format wrapper, so EventLogger can re-wrap it with a different format.
-func NewLoggerContext(cfg *ObservabilityConfig) LoggerContext {
+func NewLoggerContext(cfg *ObservabilityConfig) (LoggerContext, error) {
 	if cfg == nil {
 		return LoggerContext{
 			Logger: zerolog.New(os.Stdout).With().Timestamp().Logger(),
 			Writer: os.Stdout,
-		}
+		}, nil
 	}
 
 	rawSink := os.Stdout
-	defaultLevel := parseLogLevel(cfg.LogLevel)
-	writer := createWriter(cfg.LogFormat, rawSink)
+	defaultLevel, err := parseLogLevel(cfg.LogLevel)
+	if err != nil {
+		return LoggerContext{}, err
+	}
+	writer, err := createWriter(cfg.LogFormat, rawSink)
+	if err != nil {
+		return LoggerContext{}, err
+	}
 	return LoggerContext{
 		Logger: zerolog.New(writer).With().Timestamp().Logger().Level(defaultLevel),
 		Writer: rawSink,
-	}
+	}, nil
 }
 
 // newCompositeObserver creates a composite observer that fans out every call
@@ -117,7 +176,10 @@ func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (obser
 
 	var children []observer.Observer
 	for i, subCfg := range cfg.Observers {
-		childLogCtx := deriveLoggerContext(logCtx, &subCfg)
+		childLogCtx, err := deriveLoggerContext(logCtx, &subCfg)
+		if err != nil {
+			return nil, fmt.Errorf("observer %d: %w", i, err)
+		}
 		obs, err := NewObserverWithLogger(&subCfg, childLogCtx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create observer %d: %w", i, err)
@@ -131,24 +193,32 @@ func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (obser
 // deriveLoggerContext builds a child LoggerContext that shares the parent's
 // raw sink but applies the child config's LogLevel and/or LogFormat overrides.
 // If the child specifies neither, the parent context is returned as-is.
-func deriveLoggerContext(parent LoggerContext, cfg *ObservabilityConfig) LoggerContext {
+func deriveLoggerContext(parent LoggerContext, cfg *ObservabilityConfig) (LoggerContext, error) {
 	if cfg == nil || (cfg.LogLevel == "" && cfg.LogFormat == "") {
-		return parent
+		return parent, nil
 	}
 
 	logger := parent.Logger
 
 	if cfg.LogFormat != "" {
-		logger = logger.Output(createWriter(cfg.LogFormat, parent.Writer))
+		w, err := createWriter(cfg.LogFormat, parent.Writer)
+		if err != nil {
+			return LoggerContext{}, err
+		}
+		logger = logger.Output(w)
 	}
 	if cfg.LogLevel != "" {
-		logger = logger.Level(parseLogLevel(cfg.LogLevel))
+		lvl, err := parseLogLevel(cfg.LogLevel)
+		if err != nil {
+			return LoggerContext{}, err
+		}
+		logger = logger.Level(lvl)
 	}
 
 	return LoggerContext{
 		Logger: logger,
 		Writer: parent.Writer,
-	}
+	}, nil
 }
 
 // EventLogger creates a pre-configured sub-logger for a specific event type.
@@ -160,116 +230,56 @@ func deriveLoggerContext(parent LoggerContext, cfg *ObservabilityConfig) LoggerC
 //  3. LogLevel -- sets the minimum severity threshold
 //
 // If eventCfg is nil the logger inherits all base settings unchanged.
-func EventLogger(logCtx LoggerContext, eventName string, eventCfg *EventLoggingConfig) zerolog.Logger {
+func EventLogger(logCtx LoggerContext, eventName string, eventCfg *EventLoggingConfig) (zerolog.Logger, error) {
 	logger := logCtx.Logger.With().Str("event", eventName).Logger()
 	if eventCfg == nil {
-		return logger
+		return logger, nil
 	}
 	if eventCfg.LogFormat != "" {
-		logger = logger.Output(createWriter(eventCfg.LogFormat, logCtx.Writer))
+		w, err := createWriter(eventCfg.LogFormat, logCtx.Writer)
+		if err != nil {
+			return zerolog.Logger{}, fmt.Errorf("%s: %w", eventName, err)
+		}
+		logger = logger.Output(w)
 	}
 	if eventCfg.Enabled != nil && !*eventCfg.Enabled {
-		return logger.Level(zerolog.Disabled)
+		return logger.Level(zerolog.Disabled), nil
 	}
 	if eventCfg.LogLevel != "" {
-		return logger.Level(parseLogLevel(eventCfg.LogLevel))
+		lvl, err := parseLogLevel(eventCfg.LogLevel)
+		if err != nil {
+			return zerolog.Logger{}, fmt.Errorf("%s: %w", eventName, err)
+		}
+		return logger.Level(lvl), nil
 	}
-	return logger
+	return logger, nil
 }
 
-// createWriter creates a zerolog writer based on the format string.
-// It preserves destination by using fallback as the sink.
-func createWriter(format string, fallback io.Writer) io.Writer {
+func createWriter(format string, fallback io.Writer) (io.Writer, error) {
 	if fallback == nil {
 		fallback = os.Stdout
 	}
 	switch strings.ToLower(format) {
 	case "text":
-		return zerolog.ConsoleWriter{Out: fallback}
+		return zerolog.ConsoleWriter{Out: fallback}, nil
 	case "json", "":
-		return fallback
+		return fallback, nil
 	default:
-		return fallback
+		return nil, fmt.Errorf("invalid log_format %q (valid: json, text)", format)
 	}
 }
 
-// ValidateObservabilityConfig checks that all log_level and log_format values
-// in the config (both base and per-event) are recognized. Returns an error on
-// the first unrecognized value so operators get fast feedback on typos.
-func ValidateObservabilityConfig(cfg *ObservabilityConfig) error {
-	if cfg == nil {
-		return nil
-	}
-	if err := validateLogLevel("observability.log_level", cfg.LogLevel); err != nil {
-		return err
-	}
-	if err := validateLogFormat("observability.log_format", cfg.LogFormat); err != nil {
-		return err
-	}
-
-	events := map[string]*EventLoggingConfig{
-		"token_issuance":   cfg.TokenIssuance,
-		"token_exchange":   cfg.TokenExchange,
-		"authz_check":      cfg.AuthzCheck,
-		"config_reload":    cfg.ConfigReload,
-		"datasource_cache": cfg.DataSourceCache,
-		"lua_datasource":   cfg.LuaDataSource,
-		"key_rotation":     cfg.KeyRotation,
-		"key_provider":     cfg.KeyProvider,
-		"trust_validation": cfg.TrustValidation,
-		"jwks_cache":       cfg.JWKSCache,
-		"server_lifecycle": cfg.ServerLifecycle,
-	}
-	for name, ecfg := range events {
-		if ecfg == nil {
-			continue
-		}
-		if err := validateLogLevel("observability."+name+".log_level", ecfg.LogLevel); err != nil {
-			return err
-		}
-		if err := validateLogFormat("observability."+name+".log_format", ecfg.LogFormat); err != nil {
-			return err
-		}
-	}
-
-	for i := range cfg.Observers {
-		if err := ValidateObservabilityConfig(&cfg.Observers[i]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateLogLevel(field, value string) error {
-	switch strings.ToLower(value) {
-	case "", "debug", "info", "warn", "warning", "error":
-		return nil
-	default:
-		return fmt.Errorf("invalid %s %q (valid: debug, info, warn, error)", field, value)
-	}
-}
-
-func validateLogFormat(field, value string) error {
-	switch strings.ToLower(value) {
-	case "", "json", "text":
-		return nil
-	default:
-		return fmt.Errorf("invalid %s %q (valid: json, text)", field, value)
-	}
-}
-
-// parseLogLevel parses a log level string into a zerolog.Level.
-func parseLogLevel(levelStr string) zerolog.Level {
+func parseLogLevel(levelStr string) (zerolog.Level, error) {
 	switch strings.ToLower(levelStr) {
 	case "debug":
-		return zerolog.DebugLevel
+		return zerolog.DebugLevel, nil
 	case "info", "":
-		return zerolog.InfoLevel
+		return zerolog.InfoLevel, nil
 	case "warn", "warning":
-		return zerolog.WarnLevel
+		return zerolog.WarnLevel, nil
 	case "error":
-		return zerolog.ErrorLevel
+		return zerolog.ErrorLevel, nil
 	default:
-		return zerolog.InfoLevel
+		return 0, fmt.Errorf("invalid log_level %q (valid: debug, info, warn, error)", levelStr)
 	}
 }

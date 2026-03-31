@@ -108,7 +108,8 @@ func TestEventLogger_NilConfig_InheritsBase(t *testing.T) {
 	var buf bytes.Buffer
 	logCtx := jsonLogCtx(&buf)
 
-	logger := EventLogger(logCtx, "test_event", nil)
+	logger, err := EventLogger(logCtx, "test_event", nil)
+	require.NoError(t, err)
 	logger.Info().Msg("hello")
 
 	assert.Contains(t, buf.String(), `"event":"test_event"`)
@@ -167,7 +168,8 @@ func TestEventLogger_LevelAndEnabled(t *testing.T) {
 				Logger: zerolog.New(&buf).With().Timestamp().Logger().Level(tt.baseLevel),
 				Writer: &buf,
 			}
-			logger := EventLogger(logCtx, "evt", tt.eventCfg)
+			logger, err := EventLogger(logCtx, "evt", tt.eventCfg)
+			require.NoError(t, err)
 			logger.WithLevel(tt.emitLevel).Msg("test msg")
 
 			if tt.wantEmpty {
@@ -183,9 +185,10 @@ func TestEventLogger_FormatOverride_JSONToText(t *testing.T) {
 	var buf bytes.Buffer
 	logCtx := jsonLogCtx(&buf)
 
-	logger := EventLogger(logCtx, "text_event", &EventLoggingConfig{
+	logger, err := EventLogger(logCtx, "text_event", &EventLoggingConfig{
 		LogFormat: "text",
 	})
+	require.NoError(t, err)
 	logger.Info().Msg("text output")
 
 	output := buf.String()
@@ -203,9 +206,10 @@ func TestEventLogger_FormatOverride_TextToJSON(t *testing.T) {
 		Writer: &rawBuf,
 	}
 
-	logger := EventLogger(logCtx, "json_event", &EventLoggingConfig{
+	logger, err := EventLogger(logCtx, "json_event", &EventLoggingConfig{
 		LogFormat: "json",
 	})
+	require.NoError(t, err)
 	logger.Info().Msg("json output")
 
 	output := rawBuf.String()
@@ -218,10 +222,11 @@ func TestEventLogger_FormatAndLevel_Combined(t *testing.T) {
 	var buf bytes.Buffer
 	logCtx := jsonLogCtx(&buf)
 
-	logger := EventLogger(logCtx, "combo", &EventLoggingConfig{
+	logger, err := EventLogger(logCtx, "combo", &EventLoggingConfig{
 		LogFormat: "text",
 		LogLevel:  "debug",
 	})
+	require.NoError(t, err)
 
 	logger.Debug().Msg("combo debug")
 	output := buf.String()
@@ -239,7 +244,8 @@ func TestDeriveLoggerContext(t *testing.T) {
 			Logger: zerolog.New(&buf).With().Timestamp().Logger().Level(zerolog.InfoLevel),
 			Writer: &buf,
 		}
-		child := deriveLoggerContext(parent, &ObservabilityConfig{LogLevel: "debug"})
+		child, err := deriveLoggerContext(parent, &ObservabilityConfig{LogLevel: "debug"})
+		require.NoError(t, err)
 
 		child.Logger.Debug().Msg("child debug")
 		assert.Contains(t, buf.String(), "child debug",
@@ -252,7 +258,8 @@ func TestDeriveLoggerContext(t *testing.T) {
 			Logger: zerolog.New(&buf).With().Timestamp().Logger().Level(zerolog.InfoLevel),
 			Writer: &buf,
 		}
-		child := deriveLoggerContext(parent, &ObservabilityConfig{LogFormat: "text"})
+		child, err := deriveLoggerContext(parent, &ObservabilityConfig{LogFormat: "text"})
+		require.NoError(t, err)
 
 		child.Logger.Info().Msg("text child")
 		output := buf.String()
@@ -267,7 +274,8 @@ func TestDeriveLoggerContext(t *testing.T) {
 			Logger: zerolog.New(&buf).With().Timestamp().Logger().Level(zerolog.WarnLevel),
 			Writer: &buf,
 		}
-		child := deriveLoggerContext(parent, &ObservabilityConfig{})
+		child, err := deriveLoggerContext(parent, &ObservabilityConfig{})
+		require.NoError(t, err)
 
 		child.Logger.Info().Msg("should not appear")
 		assert.Empty(t, buf.String(), "child with no overrides should inherit parent warn level")
@@ -279,9 +287,46 @@ func TestDeriveLoggerContext(t *testing.T) {
 			Logger: zerolog.New(&buf).With().Timestamp().Logger().Level(zerolog.InfoLevel),
 			Writer: &buf,
 		}
-		child := deriveLoggerContext(parent, &ObservabilityConfig{LogLevel: "debug"})
+		child, err := deriveLoggerContext(parent, &ObservabilityConfig{LogLevel: "debug"})
+		require.NoError(t, err)
 
 		assert.Equal(t, parent.Writer, child.Writer,
 			"child must share the parent's raw sink")
 	})
+}
+
+func TestNewLoggerContext_InvalidLogLevel_ReturnsError(t *testing.T) {
+	_, err := NewLoggerContext(&ObservabilityConfig{LogLevel: "verbose"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid log_level")
+}
+
+func TestNewLoggerContext_InvalidLogFormat_ReturnsError(t *testing.T) {
+	_, err := NewLoggerContext(&ObservabilityConfig{LogFormat: "xml"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid log_format")
+}
+
+func TestEventLogger_InvalidLogLevel_ReturnsError(t *testing.T) {
+	logCtx := jsonLogCtx(&bytes.Buffer{})
+	_, err := EventLogger(logCtx, "test", &EventLoggingConfig{LogLevel: "verbose"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid log_level")
+}
+
+func TestEventLogger_InvalidLogFormat_ReturnsError(t *testing.T) {
+	logCtx := jsonLogCtx(&bytes.Buffer{})
+	_, err := EventLogger(logCtx, "test", &EventLoggingConfig{LogFormat: "xml"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid log_format")
+}
+
+func TestNewObserverWithLogger_InvalidEventConfig_ReturnsError(t *testing.T) {
+	logCtx := jsonLogCtx(&bytes.Buffer{})
+	_, err := NewObserverWithLogger(&ObservabilityConfig{
+		Type:          "logging",
+		TokenIssuance: &EventLoggingConfig{LogLevel: "verbose"},
+	}, logCtx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid log_level")
 }

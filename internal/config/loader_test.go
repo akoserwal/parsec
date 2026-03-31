@@ -1,13 +1,6 @@
 package config
 
-import (
-	"bytes"
-	"errors"
-	"strings"
-	"testing"
-
-	"github.com/rs/zerolog"
-)
+import "testing"
 
 func TestNewLoader_WithoutConfigFile(t *testing.T) {
 	// Test that loader works with empty config path (no file)
@@ -68,22 +61,5 @@ func TestNewLoader_WithEnvironmentVariables(t *testing.T) {
 	}
 	if cfg.TrustStore.Type != "stub_store" {
 		t.Errorf("Expected default trust store type 'stub_store', got '%s'", cfg.TrustStore.Type)
-	}
-}
-
-func TestLoader_logReloadFailed(t *testing.T) {
-	var buf bytes.Buffer
-	log := zerolog.New(&buf).Level(zerolog.DebugLevel).With().Str("event", "config_reload").Logger()
-	l := &Loader{reloadLog: log}
-	l.logReloadFailed("unmarshal", errors.New("bad yaml"))
-	out := buf.String()
-	if !strings.Contains(out, "config reload failed") {
-		t.Fatalf("expected message in %q", out)
-	}
-	if !strings.Contains(out, "unmarshal") {
-		t.Fatalf("expected step in %q", out)
-	}
-	if !strings.Contains(out, "bad yaml") {
-		t.Fatalf("expected error in %q", out)
 	}
 }

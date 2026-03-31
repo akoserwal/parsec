@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/rs/zerolog"
+
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/server"
@@ -16,9 +18,8 @@ import (
 type Provider struct {
 	config *Config
 
-	// Central observer — all domain constructors extract the sub-interface
-	// they need from this single value.
-	obs observer.Observer
+	logCtx *LoggerContext
+	obs    observer.Observer
 
 	// Lazily constructed components (cached after first call)
 	trustStore           trust.Store
@@ -35,22 +36,41 @@ func NewProvider(config *Config) *Provider {
 	return &Provider{config: config}
 }
 
-// SetObserver sets the central observer for all components built by this provider.
-// Must be called before any component-building method if an external observer
-// is desired. If never called, Observer() lazily builds one from config.
-func (p *Provider) SetObserver(obs observer.Observer) {
-	p.obs = obs
+func (p *Provider) loggerContext() (*LoggerContext, error) {
+	if p.logCtx != nil {
+		return p.logCtx, nil
+	}
+
+	lc, err := NewLoggerContext(p.config.Observability)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create logger context: %w", err)
+	}
+
+	p.logCtx = &lc
+	return p.logCtx, nil
 }
 
-// Observer returns the central observer.
-// If SetObserver was called, returns that observer.
-// Otherwise, lazily creates one from the observability config.
+// Logger returns the application logger built from configuration.
+func (p *Provider) Logger() (zerolog.Logger, error) {
+	lc, err := p.loggerContext()
+	if err != nil {
+		return zerolog.Nop(), err
+	}
+	return lc.Logger, nil
+}
+
+// Observer returns the central observer, lazily created from configuration.
 func (p *Provider) Observer() (observer.Observer, error) {
 	if p.obs != nil {
 		return p.obs, nil
 	}
 
-	obs, err := NewObserver(p.config.Observability)
+	lc, err := p.loggerContext()
+	if err != nil {
+		return nil, err
+	}
+
+	obs, err := NewObserverWithLogger(p.config.Observability, *lc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create observer: %w", err)
 	}

@@ -17,9 +17,7 @@ import (
 // observer interface (e.g. service.ApplicationObserver, datasource.CacheObserver,
 // keys.RotationObserver) via Go structural typing.
 //
-// Config reload logging is intentionally excluded: the Loader is a bootstrap
-// component; it logs reload failures directly via zerolog (Loader.SetReloadLogger)
-// after the first successful config parse.
+// Config reload logging is intentionally excluded from the Observer interface.
 type Observer interface {
 	service.ApplicationObserver
 	datasource.DataSourceObserver

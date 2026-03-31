@@ -122,39 +122,26 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	// 2a. Validate observability config early so typos surface at startup
-	if err := config.ValidateObservabilityConfig(cfg.Observability); err != nil {
+	// 3. Create provider (lazily builds logger and observer from config)
+	provider := config.NewProvider(cfg)
+
+	logger, err := provider.Logger()
+	if err != nil {
 		return fmt.Errorf("invalid observability config: %w", err)
 	}
 
-	// 3. Create logger and the central observer
-	logCtx := config.NewLoggerContext(cfg.Observability)
-	logger := logCtx.Logger
-
-	obs, err := config.NewObserverWithLogger(cfg.Observability, logCtx)
+	obs, err := provider.Observer()
 	if err != nil {
 		return fmt.Errorf("failed to create observer: %w", err)
 	}
 
-	// Loader is created before the central observer exists; reload failures log
-	// through a dedicated logger built with the same per-event config as infra probes.
-	var reloadCfg *config.EventLoggingConfig
-	if cfg.Observability != nil {
-		reloadCfg = cfg.Observability.ConfigReload
-	}
-	loader.SetReloadLogger(config.EventLogger(logCtx, "config_reload", reloadCfg))
-
-	// 4. Create provider and inject the observer
-	provider := config.NewProvider(cfg)
-	provider.SetObserver(obs)
-
-	// 5. Build components via provider
+	// 4. Build components via provider
 	components, err := buildRuntimeComponents(provider)
 	if err != nil {
 		return err
 	}
 
-	// 6. Create service handlers — all receive the central observer
+	// 5. Create service handlers — all receive the central observer
 	authzServer := server.NewAuthzServer(components.trustStore, components.tokenService, components.authzTokenTypes, obs)
 	exchangeServer := server.NewExchangeServer(components.trustStore, components.tokenService, components.claimsFilterRegistry, obs)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
@@ -168,7 +155,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer jwksServer.Stop()
 
-	// 7. Create TCP listeners from configured ports
+	// 6. Create TCP listeners from configured ports
 	grpcListener, err := net.Listen("tcp", fmt.Sprintf(":%d", provider.GRPCPort()))
 	if err != nil {
 		return fmt.Errorf("failed to listen on gRPC port %d: %w", provider.GRPCPort(), err)
@@ -181,7 +168,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = httpListener.Close() }()
 
-	// 8. Create and start server
+	// 7. Create and start server
 	srv := server.New(server.Config{
 		GRPCListener:   grpcListener,
 		HTTPListener:   httpListener,
@@ -194,7 +181,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to start server: %w", err)
 	}
 
-	// 8a. All components initialized — signal readiness via gRPC health service.
+	// 7a. All components initialized — signal readiness via gRPC health service.
 	srv.SetReady()
 
 	grpcAddr := grpcListener.Addr().String()
@@ -210,14 +197,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Str("config", configPath).
 		Msg("parsec is running")
 
-	// 9. Wait for interrupt signal
+	// 8. Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	<-sigCh
 
 	logger.Info().Msg("Shutting down")
 
-	// 10. Graceful shutdown
+	// 9. Graceful shutdown
 	if err := srv.Stop(ctx); err != nil {
 		return fmt.Errorf("error during shutdown: %w", err)
 	}

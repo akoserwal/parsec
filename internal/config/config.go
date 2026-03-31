@@ -348,7 +348,6 @@ type ObservabilityConfig struct {
 	TokenIssuance   *EventLoggingConfig `koanf:"token_issuance"`
 	TokenExchange   *EventLoggingConfig `koanf:"token_exchange"`
 	AuthzCheck      *EventLoggingConfig `koanf:"authz_check"`
-	ConfigReload    *EventLoggingConfig `koanf:"config_reload"`
 	DataSourceCache *EventLoggingConfig `koanf:"datasource_cache"`
 	LuaDataSource   *EventLoggingConfig `koanf:"lua_datasource"`
 	KeyRotation     *EventLoggingConfig `koanf:"key_rotation"`
