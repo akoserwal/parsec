@@ -37,6 +37,8 @@ type LuaFetchProbe interface {
 	ScriptExecutionFailed(err error)
 	InvalidReturnType(got string)
 	FetchCompleted()
+	FetchCompletedNil()
+	ResultConversionFailed(err error)
 	End()
 }
 
@@ -62,11 +64,13 @@ func (NoOpCacheFetchProbe) End()              {}
 // Embed this in concrete probe types for forward compatibility.
 type NoOpLuaFetchProbe struct{}
 
-func (NoOpLuaFetchProbe) ScriptLoadFailed(error)      {}
-func (NoOpLuaFetchProbe) ScriptExecutionFailed(error) {}
-func (NoOpLuaFetchProbe) InvalidReturnType(string)    {}
-func (NoOpLuaFetchProbe) FetchCompleted()             {}
-func (NoOpLuaFetchProbe) End()                        {}
+func (NoOpLuaFetchProbe) ScriptLoadFailed(error)       {}
+func (NoOpLuaFetchProbe) ScriptExecutionFailed(error)  {}
+func (NoOpLuaFetchProbe) InvalidReturnType(string)     {}
+func (NoOpLuaFetchProbe) FetchCompleted()              {}
+func (NoOpLuaFetchProbe) FetchCompletedNil()           {}
+func (NoOpLuaFetchProbe) ResultConversionFailed(error) {}
+func (NoOpLuaFetchProbe) End()                         {}
 
 // NoOpCacheObserver is a no-op implementation of CacheObserver.
 // Embed this in concrete observer types for forward compatibility.

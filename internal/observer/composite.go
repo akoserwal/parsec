@@ -175,6 +175,16 @@ func (m *compositeLuaFetchProbe) FetchCompleted() {
 		p.FetchCompleted()
 	}
 }
+func (m *compositeLuaFetchProbe) FetchCompletedNil() {
+	for _, p := range m.probes {
+		p.FetchCompletedNil()
+	}
+}
+func (m *compositeLuaFetchProbe) ResultConversionFailed(err error) {
+	for _, p := range m.probes {
+		p.ResultConversionFailed(err)
+	}
+}
 func (m *compositeLuaFetchProbe) End() {
 	for _, p := range m.probes {
 		p.End()

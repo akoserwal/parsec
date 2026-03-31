@@ -49,6 +49,14 @@ func (p *loggingLuaFetchProbe) FetchCompleted() {
 	p.logger.Debug().Msg("lua fetch completed")
 }
 
+func (p *loggingLuaFetchProbe) FetchCompletedNil() {
+	p.logger.Debug().Msg("lua fetch completed with nil result")
+}
+
+func (p *loggingLuaFetchProbe) ResultConversionFailed(err error) {
+	p.logger.Error().Err(err).Msg("lua result table conversion failed")
+}
+
 func (p *loggingLuaFetchProbe) End() {
 	p.logger.Debug().
 		Dur("duration", time.Since(p.startTime)).

@@ -148,7 +148,7 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 	L.Pop(1)
 
 	if ret.Type() == lua.LTNil {
-		p.FetchCompleted()
+		p.FetchCompletedNil()
 		return nil, nil
 	}
 
@@ -159,6 +159,7 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 
 	result, err := ds.luaTableToResult(ret.(*lua.LTable))
 	if err != nil {
+		p.ResultConversionFailed(err)
 		return nil, err
 	}
 	p.FetchCompleted()
