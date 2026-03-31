@@ -96,8 +96,8 @@ func (m *AWSKMSKeyProvider) GetKeyHandle(ctx context.Context, trustDomain, names
 }
 
 func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespace, keyName string) error {
-	ctx, provProbe := m.observer.KeyProvisionStarted(ctx)
-	defer provProbe.End()
+	ctx, p := m.observer.KeyProvisionStarted(ctx)
+	defer p.End()
 
 	// 1. Create new KMS key (CMK) using configured keyType
 	keySpec, err := keySpecFromKeyType(m.keyType)
@@ -150,7 +150,7 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 			PendingWindowInDays: aws.Int32(7),
 		})
 		if err != nil {
-			provProbe.OldKeyDeletionFailed(oldKeyID, err)
+			p.OldKeyDeletionFailed(oldKeyID, err)
 		}
 	}
 

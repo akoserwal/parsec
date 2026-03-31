@@ -74,19 +74,19 @@ func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 // Start begins the background cache refresh
 func (s *JWKSServer) Start(ctx context.Context) error {
 	// Populate cache immediately
-	ctx, initProbe := s.observer.CacheRefreshStarted(ctx)
-	if err := s.refreshCache(ctx, initProbe); err != nil {
-		initProbe.InitialCachePopulationFailed(err)
+	ctx, p := s.observer.CacheRefreshStarted(ctx)
+	if err := s.refreshCache(ctx, p); err != nil {
+		p.InitialCachePopulationFailed(err)
 	}
-	initProbe.End()
+	p.End()
 
 	// Start background refresh
 	s.ticker = s.clock.Ticker(s.refreshInterval)
 	return s.ticker.Start(func(ctx context.Context) {
-		ctx, bgProbe := s.observer.CacheRefreshStarted(ctx)
-		defer bgProbe.End()
-		if err := s.refreshCache(ctx, bgProbe); err != nil {
-			bgProbe.CacheRefreshFailed(err)
+		ctx, p := s.observer.CacheRefreshStarted(ctx)
+		defer p.End()
+		if err := s.refreshCache(ctx, p); err != nil {
+			p.CacheRefreshFailed(err)
 		}
 	})
 }
@@ -119,9 +119,9 @@ func (s *JWKSServer) GetJWKS(ctx context.Context, req *parsecv1.GetJWKSRequest) 
 
 	// Cache is empty (first request or failed initial population)
 	// Build the response synchronously to ensure immediate availability
-	ctx, syncProbe := s.observer.CacheRefreshStarted(ctx)
-	defer syncProbe.End()
-	return s.buildJWKSResponse(ctx, syncProbe)
+	ctx, p := s.observer.CacheRefreshStarted(ctx)
+	defer p.End()
+	return s.buildJWKSResponse(ctx, p)
 }
 
 // refreshCache updates the cached JWKS response in the background

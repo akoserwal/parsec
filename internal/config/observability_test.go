@@ -33,8 +33,8 @@ func TestNewObserverWithLogger_NoopType(t *testing.T) {
 			require.NotNil(t, obs)
 
 			ctx := context.Background()
-			_, rp := obs.RotationCheckStarted(ctx)
-			rp.RotationCompleted("slot")
+			_, p := obs.RotationCheckStarted(ctx)
+			p.RotationCompleted("slot")
 		})
 	}
 }

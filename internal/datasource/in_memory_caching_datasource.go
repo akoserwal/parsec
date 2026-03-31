@@ -74,8 +74,8 @@ func (c *InMemoryCachingDataSource) Name() string {
 
 // Fetch checks the cache first, then fetches from source on miss
 func (c *InMemoryCachingDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
-	ctx, cacheProbe := c.observer.CacheFetchStarted(ctx, c.source.Name())
-	defer cacheProbe.End()
+	ctx, p := c.observer.CacheFetchStarted(ctx, c.source.Name())
+	defer p.End()
 
 	// Get the cache key (which is the masked input with only relevant fields)
 	maskedInput := c.cacheable.CacheKey(input)
@@ -95,21 +95,21 @@ func (c *InMemoryCachingDataSource) Fetch(ctx context.Context, input *service.Da
 	if found {
 		// Check if entry has expired
 		if entry.expiresAt.IsZero() || c.clock.Now().Before(entry.expiresAt) {
-			cacheProbe.CacheHit()
+			p.CacheHit()
 			return entry.result, nil
 		}
-		cacheProbe.CacheExpired()
+		p.CacheExpired()
 		c.mu.Lock()
 		delete(c.entries, cacheKeyStr)
 		c.mu.Unlock()
 	}
 
-	cacheProbe.CacheMiss()
+	p.CacheMiss()
 
 	// Cache miss - fetch from source using the original (full) input
 	result, err := c.source.Fetch(ctx, input)
 	if err != nil {
-		cacheProbe.FetchFailed(err)
+		p.FetchFailed(err)
 		return nil, err
 	}
 

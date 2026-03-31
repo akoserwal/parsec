@@ -66,12 +66,12 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 // Check implements the ext_authz check endpoint
 func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
 	// Create request-scoped probe
-	ctx, probe := s.observer.AuthzCheckStarted(ctx)
-	defer probe.End()
+	ctx, p := s.observer.AuthzCheckStarted(ctx)
+	defer p.End()
 
 	// 1. Build request attributes
 	reqAttrs := s.buildRequestAttributes(req)
-	probe.RequestAttributesParsed(reqAttrs)
+	p.RequestAttributesParsed(reqAttrs)
 
 	// 2. Extract actor credential from gRPC context
 	actorCred, err := extractActorCredential(ctx)
@@ -85,14 +85,14 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		var validationErr error
 		actor, validationErr = s.trustStore.Validate(ctx, actorCred)
 		if validationErr != nil {
-			probe.ActorValidationFailed(validationErr)
+			p.ActorValidationFailed(validationErr)
 			return s.denyResponse(codes.Unauthenticated,
 				fmt.Sprintf("actor validation failed: %v", validationErr)), nil
 		}
-		probe.ActorValidationSucceeded(actor)
+		p.ActorValidationSucceeded(actor)
 	} else {
 		actor = trust.AnonymousResult()
-		probe.ActorValidationSucceeded(actor)
+		p.ActorValidationSucceeded(actor)
 	}
 
 	// 3. Filter trust store based on actor permissions
@@ -106,19 +106,19 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	// The extraction layer returns both the credential and which headers were used
 	cred, headersUsed, err := s.extractCredential(req)
 	if err != nil {
-		probe.SubjectCredentialExtractionFailed(err)
+		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
-	probe.SubjectCredentialExtracted(cred, headersUsed)
+	p.SubjectCredentialExtracted(cred, headersUsed)
 
 	// 5. Validate subject credentials against filtered trust store
 	// The filtered store only includes validators the actor is allowed to use
 	result, err := filteredStore.Validate(ctx, cred)
 	if err != nil {
-		probe.SubjectValidationFailed(err)
+		p.SubjectValidationFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("validation failed: %v", err)), nil
 	}
-	probe.SubjectValidationSucceeded(result)
+	p.SubjectValidationSucceeded(result)
 
 	// 6. Issue tokens via TokenService
 	tokenTypes := make([]service.TokenType, len(s.TokenTypesToIssue))

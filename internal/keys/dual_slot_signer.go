@@ -152,9 +152,9 @@ func (r *DualSlotRotatingSigner) Start(ctx context.Context) error {
 	}
 
 	// Initialize active key cache
-	ctx, initProbe := r.observer.RotationCheckStarted(ctx)
-	defer initProbe.End()
-	if err := r.updateActiveKeyCache(ctx, initProbe); err != nil {
+	ctx, p := r.observer.RotationCheckStarted(ctx)
+	defer p.End()
+	if err := r.updateActiveKeyCache(ctx, p); err != nil {
 		return fmt.Errorf("failed to initialize active key cache: %w", err)
 	}
 

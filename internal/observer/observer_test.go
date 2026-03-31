@@ -17,75 +17,86 @@ func TestNoOp_AllProbeMethodsCallable(t *testing.T) {
 	obs := NoOp()
 	ctx := context.Background()
 
-	ctx2, tip := obs.TokenIssuanceStarted(ctx, nil, nil, "", nil)
-	if ctx2 != ctx {
-		t.Error("expected same context back from noop TokenIssuanceStarted")
+	{
+		ctx2, p := obs.TokenIssuanceStarted(ctx, nil, nil, "", nil)
+		if ctx2 != ctx {
+			t.Error("expected same context back from noop TokenIssuanceStarted")
+		}
+		p.TokenTypeIssuanceStarted("t")
+		p.TokenTypeIssuanceSucceeded("t", nil)
+		p.TokenTypeIssuanceFailed("t", errors.New("x"))
+		p.IssuerNotFound("t", errors.New("x"))
+		p.End()
 	}
-	tip.TokenTypeIssuanceStarted("t")
-	tip.TokenTypeIssuanceSucceeded("t", nil)
-	tip.TokenTypeIssuanceFailed("t", errors.New("x"))
-	tip.IssuerNotFound("t", errors.New("x"))
-	tip.End()
-
-	_, tep := obs.TokenExchangeStarted(ctx, "", "", "", "")
-	tep.ActorValidationSucceeded(nil)
-	tep.ActorValidationFailed(errors.New("x"))
-	tep.RequestContextParsed(nil)
-	tep.RequestContextParseFailed(errors.New("x"))
-	tep.SubjectTokenValidationSucceeded(nil)
-	tep.SubjectTokenValidationFailed(errors.New("x"))
-	tep.End()
-
-	_, acp := obs.AuthzCheckStarted(ctx)
-	acp.RequestAttributesParsed(nil)
-	acp.ActorValidationSucceeded(nil)
-	acp.ActorValidationFailed(errors.New("x"))
-	acp.SubjectCredentialExtracted(nil, nil)
-	acp.SubjectCredentialExtractionFailed(errors.New("x"))
-	acp.SubjectValidationSucceeded(nil)
-	acp.SubjectValidationFailed(errors.New("x"))
-	acp.End()
-
-	_, dp := obs.CacheFetchStarted(ctx, "ds")
-	dp.CacheHit()
-	dp.CacheMiss()
-	dp.CacheExpired()
-	dp.FetchFailed(errors.New("x"))
-
-	_, lp := obs.LuaFetchStarted(ctx, "lua")
-	lp.ScriptLoadFailed(errors.New("x"))
-	lp.ScriptExecutionFailed(errors.New("x"))
-	lp.InvalidReturnType("number")
-	lp.FetchCompleted()
-
-	_, kp := obs.RotationCheckStarted(ctx)
-	kp.RotationCheckFailed(errors.New("x"))
-	kp.ActiveKeyCacheUpdateFailed(errors.New("x"))
-	kp.RotationCompleted("slot")
-	kp.RotationSkippedVersionRace("slot")
-	kp.KeyProviderNotFound("p", "s")
-	kp.KeyHandleFailed("s", errors.New("x"))
-	kp.PublicKeyFailed("s", errors.New("x"))
-	kp.ThumbprintFailed("s", errors.New("x"))
-	kp.MetadataFailed("s", errors.New("x"))
-
-	_, pp := obs.KeyProvisionStarted(ctx)
-	pp.OldKeyDeletionFailed("kid", errors.New("x"))
-
-	_, tp := obs.ValidationStarted(ctx)
-	tp.ValidatorFailed("v", trust.CredentialTypeJWT, errors.New("x"))
-	tp.AllValidatorsFailed(trust.CredentialTypeBearer, 2, errors.New("x"))
-	tp.ValidatorFiltered("v", "actor")
-	tp.FilterEvaluationFailed("v", errors.New("x"))
-
-	_, jp := obs.CacheRefreshStarted(ctx)
-	jp.InitialCachePopulationFailed(errors.New("x"))
-	jp.CacheRefreshFailed(errors.New("x"))
-	jp.KeyConversionFailed("kid", errors.New("x"))
-
-	_, sp := obs.ServeStarted(ctx)
-	sp.GRPCServeFailed(errors.New("x"))
-	sp.HTTPServeFailed(errors.New("x"))
+	{
+		_, p := obs.TokenExchangeStarted(ctx, "", "", "", "")
+		p.ActorValidationSucceeded(nil)
+		p.ActorValidationFailed(errors.New("x"))
+		p.RequestContextParsed(nil)
+		p.RequestContextParseFailed(errors.New("x"))
+		p.SubjectTokenValidationSucceeded(nil)
+		p.SubjectTokenValidationFailed(errors.New("x"))
+		p.End()
+	}
+	{
+		_, p := obs.AuthzCheckStarted(ctx)
+		p.RequestAttributesParsed(nil)
+		p.ActorValidationSucceeded(nil)
+		p.ActorValidationFailed(errors.New("x"))
+		p.SubjectCredentialExtracted(nil, nil)
+		p.SubjectCredentialExtractionFailed(errors.New("x"))
+		p.SubjectValidationSucceeded(nil)
+		p.SubjectValidationFailed(errors.New("x"))
+		p.End()
+	}
+	{
+		_, p := obs.CacheFetchStarted(ctx, "ds")
+		p.CacheHit()
+		p.CacheMiss()
+		p.CacheExpired()
+		p.FetchFailed(errors.New("x"))
+	}
+	{
+		_, p := obs.LuaFetchStarted(ctx, "lua")
+		p.ScriptLoadFailed(errors.New("x"))
+		p.ScriptExecutionFailed(errors.New("x"))
+		p.InvalidReturnType("number")
+		p.FetchCompleted()
+	}
+	{
+		_, p := obs.RotationCheckStarted(ctx)
+		p.RotationCheckFailed(errors.New("x"))
+		p.ActiveKeyCacheUpdateFailed(errors.New("x"))
+		p.RotationCompleted("slot")
+		p.RotationSkippedVersionRace("slot")
+		p.KeyProviderNotFound("p", "s")
+		p.KeyHandleFailed("s", errors.New("x"))
+		p.PublicKeyFailed("s", errors.New("x"))
+		p.ThumbprintFailed("s", errors.New("x"))
+		p.MetadataFailed("s", errors.New("x"))
+	}
+	{
+		_, p := obs.KeyProvisionStarted(ctx)
+		p.OldKeyDeletionFailed("kid", errors.New("x"))
+	}
+	{
+		_, p := obs.ValidationStarted(ctx)
+		p.ValidatorFailed("v", trust.CredentialTypeJWT, errors.New("x"))
+		p.AllValidatorsFailed(trust.CredentialTypeBearer, 2, errors.New("x"))
+		p.ValidatorFiltered("v", "actor")
+		p.FilterEvaluationFailed("v", errors.New("x"))
+	}
+	{
+		_, p := obs.CacheRefreshStarted(ctx)
+		p.InitialCachePopulationFailed(errors.New("x"))
+		p.CacheRefreshFailed(errors.New("x"))
+		p.KeyConversionFailed("kid", errors.New("x"))
+	}
+	{
+		_, p := obs.ServeStarted(ctx)
+		p.GRPCServeFailed(errors.New("x"))
+		p.HTTPServeFailed(errors.New("x"))
+	}
 }
 
 func TestCompose_DelegatesToCorrectSubObserver(t *testing.T) {
@@ -263,8 +274,8 @@ func TestCompositeAll_MultiProbe_FansOutEvents(t *testing.T) {
 	)
 
 	composite := CompositeAll([]Observer{child1, child2})
-	_, probe := composite.CacheFetchStarted(context.Background(), "ds")
-	probe.CacheHit()
+	_, p := composite.CacheFetchStarted(context.Background(), "ds")
+	p.CacheHit()
 
 	if hits1.Load() != 1 {
 		t.Errorf("child1 CacheHit: expected 1, got %d", hits1.Load())
