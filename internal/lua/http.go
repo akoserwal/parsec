@@ -20,6 +20,7 @@ type HTTPService struct {
 	client         *http.Client
 	timeout        time.Duration
 	requestOptions RequestOptions
+	ctx            context.Context
 }
 
 // HTTPServiceConfig configures the HTTP service
@@ -62,6 +63,7 @@ func NewHTTPServiceWithConfig(config HTTPServiceConfig) *HTTPService {
 		},
 		timeout:        config.Timeout,
 		requestOptions: config.RequestOptions,
+		ctx:            context.Background(),
 	}
 }
 
@@ -90,8 +92,7 @@ func (s *HTTPService) luaHTTPGet(L *lua.LState) int {
 	url := L.CheckString(1)
 	headers := s.parseHeaders(L, 2)
 
-	req, err := http.NewRequest("GET", url, nil)
-
+	req, err := http.NewRequestWithContext(s.ctx, "GET", url, nil)
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(fmt.Sprintf("failed to create request: %v", err)))
@@ -131,7 +132,7 @@ func (s *HTTPService) luaHTTPPost(L *lua.LState) int {
 	body := L.CheckString(2)
 	headers := s.parseHeaders(L, 3)
 
-	req, err := http.NewRequest("POST", url, bytes.NewBufferString(body))
+	req, err := http.NewRequestWithContext(s.ctx, "POST", url, bytes.NewBufferString(body))
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(fmt.Sprintf("failed to create request: %v", err)))
@@ -178,7 +179,7 @@ func (s *HTTPService) luaHTTPRequest(L *lua.LState) int {
 
 	headers := s.parseHeaders(L, 4)
 
-	req, err := http.NewRequest(method, url, body)
+	req, err := http.NewRequestWithContext(s.ctx, method, url, body)
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(fmt.Sprintf("failed to create request: %v", err)))
@@ -261,9 +262,10 @@ func (s *HTTPService) responseToLua(L *lua.LState, resp *http.Response) *lua.LTa
 	return tbl
 }
 
-// WithContext allows setting a context for requests (useful for cancellation)
+// WithContext returns a shallow copy of the service that uses ctx for all
+// outgoing HTTP requests, propagating tracing spans and request IDs.
 func (s *HTTPService) WithContext(ctx context.Context) *HTTPService {
-	// Create a new client with context-aware transport
-	// Note: This is a simplified version. For production, you'd want to wrap the transport
-	return s
+	cp := *s
+	cp.ctx = ctx
+	return &cp
 }
