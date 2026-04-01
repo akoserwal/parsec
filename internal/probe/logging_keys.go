@@ -31,6 +31,13 @@ func (o *LoggingKeyRotationObserver) RotationCheckStarted(ctx context.Context) (
 	}
 }
 
+func (o *LoggingKeyRotationObserver) KeyCacheUpdateStarted(ctx context.Context) (context.Context, keys.KeyCacheUpdateProbe) {
+	return ctx, &loggingKeyCacheUpdateProbe{
+		logger:    o.logger,
+		startTime: time.Now(),
+	}
+}
+
 type loggingRotationCheckProbe struct {
 	keys.NoOpRotationCheckProbe
 	logger    zerolog.Logger
@@ -41,10 +48,6 @@ func (p *loggingRotationCheckProbe) RotationCheckFailed(err error) {
 	p.logger.Error().Err(err).Msg("key rotation check failed")
 }
 
-func (p *loggingRotationCheckProbe) ActiveKeyCacheUpdateFailed(err error) {
-	p.logger.Error().Err(err).Msg("active key cache update failed")
-}
-
 func (p *loggingRotationCheckProbe) RotationCompleted(slot string) {
 	p.logger.Info().Str("slot", slot).Msg("key rotation completed")
 }
@@ -53,30 +56,46 @@ func (p *loggingRotationCheckProbe) RotationSkippedVersionRace(slot string) {
 	p.logger.Info().Str("slot", slot).Msg("another process completed rotation, skipping")
 }
 
-func (p *loggingRotationCheckProbe) KeyProviderNotFound(provider, slot string) {
-	p.logger.Warn().Str("provider", provider).Str("slot", slot).Msg("key provider not found, skipping")
-}
-
-func (p *loggingRotationCheckProbe) KeyHandleFailed(slot string, err error) {
-	p.logger.Warn().Err(err).Str("slot", slot).Msg("failed to get key handle")
-}
-
-func (p *loggingRotationCheckProbe) PublicKeyFailed(slot string, err error) {
-	p.logger.Warn().Err(err).Str("slot", slot).Msg("failed to get public key")
-}
-
-func (p *loggingRotationCheckProbe) ThumbprintFailed(slot string, err error) {
-	p.logger.Warn().Err(err).Str("slot", slot).Msg("failed to compute thumbprint")
-}
-
-func (p *loggingRotationCheckProbe) MetadataFailed(slot string, err error) {
-	p.logger.Warn().Err(err).Str("slot", slot).Msg("failed to get key metadata")
-}
-
 func (p *loggingRotationCheckProbe) End() {
 	p.logger.Debug().
 		Dur("duration", time.Since(p.startTime)).
 		Msg("rotation check completed")
+}
+
+type loggingKeyCacheUpdateProbe struct {
+	keys.NoOpKeyCacheUpdateProbe
+	logger    zerolog.Logger
+	startTime time.Time
+}
+
+func (p *loggingKeyCacheUpdateProbe) KeyCacheUpdateFailed(err error) {
+	p.logger.Error().Err(err).Msg("active key cache update failed")
+}
+
+func (p *loggingKeyCacheUpdateProbe) KeyProviderNotFound(provider, slot string) {
+	p.logger.Warn().Str("provider", provider).Str("slot", slot).Msg("key provider not found, skipping")
+}
+
+func (p *loggingKeyCacheUpdateProbe) KeyHandleFailed(slot string, err error) {
+	p.logger.Warn().Err(err).Str("slot", slot).Msg("failed to get key handle")
+}
+
+func (p *loggingKeyCacheUpdateProbe) PublicKeyFailed(slot string, err error) {
+	p.logger.Warn().Err(err).Str("slot", slot).Msg("failed to get public key")
+}
+
+func (p *loggingKeyCacheUpdateProbe) ThumbprintFailed(slot string, err error) {
+	p.logger.Warn().Err(err).Str("slot", slot).Msg("failed to compute thumbprint")
+}
+
+func (p *loggingKeyCacheUpdateProbe) MetadataFailed(slot string, err error) {
+	p.logger.Warn().Err(err).Str("slot", slot).Msg("failed to get key metadata")
+}
+
+func (p *loggingKeyCacheUpdateProbe) End() {
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("key cache update completed")
 }
 
 // LoggingKeyProviderObserver logs key provider lifecycle events via zerolog.

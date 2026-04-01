@@ -44,7 +44,6 @@ type Server struct {
 	httpListener    net.Listener
 	grpcDialOptions []grpc.DialOption
 	observer        LifecycleObserver
-	serveProbe      ServeProbe
 
 	authzServer    *AuthzServer
 	exchangeServer *ExchangeServer
@@ -152,15 +151,14 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// All fallible setup is complete. Launch the serve goroutines last so
 	// that an early-return error never orphans a running goroutine.
-	_, s.serveProbe = s.observer.ServeStarted(ctx)
 	go func() {
 		if err := s.grpcServer.Serve(s.grpcListener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-			s.serveProbe.GRPCServeFailed(err)
+			s.observer.GRPCServeFailed(err)
 		}
 	}()
 	go func() {
 		if err := s.httpServer.Serve(s.httpListener); err != nil && err != http.ErrServerClosed {
-			s.serveProbe.HTTPServeFailed(err)
+			s.observer.HTTPServeFailed(err)
 		}
 	}()
 
@@ -188,9 +186,9 @@ func (s *Server) SetNotReady() {
 
 // Stop gracefully stops both servers
 func (s *Server) Stop(ctx context.Context) error {
-	if s.serveProbe != nil {
-		defer s.serveProbe.End()
-	}
+	_, p := s.observer.StopStarted(ctx)
+	defer p.End()
+
 	// Signal health watchers that all services are going away.
 	// Shutdown sets every registered service to NOT_SERVING and
 	// ignores any future SetServingStatus calls.

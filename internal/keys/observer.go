@@ -7,17 +7,24 @@ import "context"
 // with new methods added to this interface.
 type RotationObserver interface {
 	// RotationCheckStarted is called when a rotation check begins.
-	// Returns a potentially modified context and a probe to track the operation.
 	RotationCheckStarted(ctx context.Context) (context.Context, RotationCheckProbe)
+	// KeyCacheUpdateStarted is called when the active key cache is being rebuilt.
+	KeyCacheUpdateStarted(ctx context.Context) (context.Context, KeyCacheUpdateProbe)
 }
 
 // RotationCheckProbe tracks a single rotation check invocation.
 // Implementations should embed NoOpRotationCheckProbe for forward compatibility.
 type RotationCheckProbe interface {
 	RotationCheckFailed(err error)
-	ActiveKeyCacheUpdateFailed(err error)
 	RotationCompleted(slot string)
 	RotationSkippedVersionRace(slot string)
+	End()
+}
+
+// KeyCacheUpdateProbe tracks a single active-key-cache rebuild.
+// Implementations should embed NoOpKeyCacheUpdateProbe for forward compatibility.
+type KeyCacheUpdateProbe interface {
+	KeyCacheUpdateFailed(err error)
 	KeyProviderNotFound(provider, slot string)
 	KeyHandleFailed(slot string, err error)
 	PublicKeyFailed(slot string, err error)
@@ -51,33 +58,39 @@ type KeysObserver interface {
 // --- NoOp implementations ---
 
 // NoOpRotationCheckProbe is a no-op implementation of RotationCheckProbe.
-// Embed this in concrete probe types for forward compatibility.
 type NoOpRotationCheckProbe struct{}
 
-func (NoOpRotationCheckProbe) RotationCheckFailed(error)          {}
-func (NoOpRotationCheckProbe) ActiveKeyCacheUpdateFailed(error)   {}
-func (NoOpRotationCheckProbe) RotationCompleted(string)           {}
-func (NoOpRotationCheckProbe) RotationSkippedVersionRace(string)  {}
-func (NoOpRotationCheckProbe) KeyProviderNotFound(string, string) {}
-func (NoOpRotationCheckProbe) KeyHandleFailed(string, error)      {}
-func (NoOpRotationCheckProbe) PublicKeyFailed(string, error)      {}
-func (NoOpRotationCheckProbe) ThumbprintFailed(string, error)     {}
-func (NoOpRotationCheckProbe) MetadataFailed(string, error)       {}
-func (NoOpRotationCheckProbe) End()                               {}
+func (NoOpRotationCheckProbe) RotationCheckFailed(error)         {}
+func (NoOpRotationCheckProbe) RotationCompleted(string)          {}
+func (NoOpRotationCheckProbe) RotationSkippedVersionRace(string) {}
+func (NoOpRotationCheckProbe) End()                              {}
+
+// NoOpKeyCacheUpdateProbe is a no-op implementation of KeyCacheUpdateProbe.
+type NoOpKeyCacheUpdateProbe struct{}
+
+func (NoOpKeyCacheUpdateProbe) KeyCacheUpdateFailed(error)         {}
+func (NoOpKeyCacheUpdateProbe) KeyProviderNotFound(string, string) {}
+func (NoOpKeyCacheUpdateProbe) KeyHandleFailed(string, error)      {}
+func (NoOpKeyCacheUpdateProbe) PublicKeyFailed(string, error)      {}
+func (NoOpKeyCacheUpdateProbe) ThumbprintFailed(string, error)     {}
+func (NoOpKeyCacheUpdateProbe) MetadataFailed(string, error)       {}
+func (NoOpKeyCacheUpdateProbe) End()                               {}
 
 // NoOpKeyProvisionProbe is a no-op implementation of KeyProvisionProbe.
-// Embed this in concrete probe types for forward compatibility.
 type NoOpKeyProvisionProbe struct{}
 
 func (NoOpKeyProvisionProbe) OldKeyDeletionFailed(string, error) {}
 func (NoOpKeyProvisionProbe) End()                               {}
 
 // NoOpRotationObserver is a no-op implementation of RotationObserver.
-// Embed this in concrete observer types for forward compatibility.
 type NoOpRotationObserver struct{}
 
 func (NoOpRotationObserver) RotationCheckStarted(ctx context.Context) (context.Context, RotationCheckProbe) {
 	return ctx, NoOpRotationCheckProbe{}
+}
+
+func (NoOpRotationObserver) KeyCacheUpdateStarted(ctx context.Context) (context.Context, KeyCacheUpdateProbe) {
+	return ctx, NoOpKeyCacheUpdateProbe{}
 }
 
 // NoOpProviderObserver is a no-op implementation of ProviderObserver.

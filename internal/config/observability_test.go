@@ -69,9 +69,7 @@ func TestNewObserverWithLogger_CompositeType(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, obs)
 
-	ctx := context.Background()
-	_, p := obs.ServeStarted(ctx)
-	p.GRPCServeFailed(errors.New("bind error"))
+	obs.GRPCServeFailed(errors.New("bind error"))
 
 	output := buf.String()
 	// Two logging children means the message should appear twice

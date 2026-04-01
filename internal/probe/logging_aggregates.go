@@ -54,6 +54,10 @@ func (o *LoggingKeysObserver) RotationCheckStarted(ctx context.Context) (context
 	return o.rotation.RotationCheckStarted(ctx)
 }
 
+func (o *LoggingKeysObserver) KeyCacheUpdateStarted(ctx context.Context) (context.Context, keys.KeyCacheUpdateProbe) {
+	return o.rotation.KeyCacheUpdateStarted(ctx)
+}
+
 func (o *LoggingKeysObserver) KeyProvisionStarted(ctx context.Context) (context.Context, keys.KeyProvisionProbe) {
 	return o.provider.KeyProvisionStarted(ctx)
 }
@@ -75,12 +79,24 @@ func NewLoggingServerObserver(jwksLogger, lifecycleLogger zerolog.Logger) *Loggi
 	}
 }
 
+func (o *LoggingServerObserver) InitPopulationStarted(ctx context.Context) (context.Context, server.InitPopulationProbe) {
+	return o.jwks.InitPopulationStarted(ctx)
+}
+
 func (o *LoggingServerObserver) CacheRefreshStarted(ctx context.Context) (context.Context, server.CacheRefreshProbe) {
 	return o.jwks.CacheRefreshStarted(ctx)
 }
 
-func (o *LoggingServerObserver) ServeStarted(ctx context.Context) (context.Context, server.ServeProbe) {
-	return o.lifecycle.ServeStarted(ctx)
+func (o *LoggingServerObserver) GRPCServeFailed(err error) {
+	o.lifecycle.GRPCServeFailed(err)
+}
+
+func (o *LoggingServerObserver) HTTPServeFailed(err error) {
+	o.lifecycle.HTTPServeFailed(err)
+}
+
+func (o *LoggingServerObserver) StopStarted(ctx context.Context) (context.Context, server.StopProbe) {
+	return o.lifecycle.StopStarted(ctx)
 }
 
 var _ server.ServerObserver = (*LoggingServerObserver)(nil)

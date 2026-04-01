@@ -87,11 +87,10 @@ func newTestDualSlotRotatingSigner(t *testing.T, clk clock.Clock, slotStore KeyS
 func TestDualSlotRotatingSigner_RotationFailure_MaintainsOldKey(t *testing.T) {
 	clk := clock.NewFixtureClock(time.Time{})
 
-	// Setup backing key provider that we can make fail
 	baseProvider := NewInMemoryKeyProvider(KeyTypeECP256, "ES256")
-	mockProvider := &failKeyProvider{InMemoryKeyProvider: baseProvider}
+	stubProvider := &failKeyProvider{InMemoryKeyProvider: baseProvider}
 
-	rs, _ := newTestDualSlotRotatingSigner(t, clk, nil, mockProvider)
+	rs, _ := newTestDualSlotRotatingSigner(t, clk, nil, stubProvider)
 
 	ctx := context.Background()
 
@@ -109,8 +108,7 @@ func TestDualSlotRotatingSigner_RotationFailure_MaintainsOldKey(t *testing.T) {
 	// KeyTTL=30m, Threshold=8m => Rotate at 22m
 	clk.Advance(21 * time.Minute)
 
-	// 3. Set mockProvider to fail BEFORE rotation is attempted
-	mockProvider.failCreate = true
+	stubProvider.failCreate = true
 
 	// 4. Advance past rotation threshold (to 23m)
 	clk.Advance(2 * time.Minute)

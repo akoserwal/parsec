@@ -87,6 +87,14 @@ func (c *compositeAll) RotationCheckStarted(ctx context.Context) (context.Contex
 	return ctx, &compositeRotationCheckProbe{probes}
 }
 
+func (c *compositeAll) KeyCacheUpdateStarted(ctx context.Context) (context.Context, keys.KeyCacheUpdateProbe) {
+	probes := make([]keys.KeyCacheUpdateProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.KeyCacheUpdateStarted(ctx)
+	}
+	return ctx, &compositeKeyCacheUpdateProbe{probes}
+}
+
 func (c *compositeAll) KeyProvisionStarted(ctx context.Context) (context.Context, keys.KeyProvisionProbe) {
 	probes := make([]keys.KeyProvisionProbe, len(c.children))
 	for i, ch := range c.children {
@@ -103,6 +111,14 @@ func (c *compositeAll) ValidationStarted(ctx context.Context) (context.Context, 
 	return ctx, &compositeValidationProbe{probes}
 }
 
+func (c *compositeAll) InitPopulationStarted(ctx context.Context) (context.Context, server.InitPopulationProbe) {
+	probes := make([]server.InitPopulationProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.InitPopulationStarted(ctx)
+	}
+	return ctx, &compositeInitPopulationProbe{probes}
+}
+
 func (c *compositeAll) CacheRefreshStarted(ctx context.Context) (context.Context, server.CacheRefreshProbe) {
 	probes := make([]server.CacheRefreshProbe, len(c.children))
 	for i, ch := range c.children {
@@ -111,12 +127,24 @@ func (c *compositeAll) CacheRefreshStarted(ctx context.Context) (context.Context
 	return ctx, &compositeCacheRefreshProbe{probes}
 }
 
-func (c *compositeAll) ServeStarted(ctx context.Context) (context.Context, server.ServeProbe) {
-	probes := make([]server.ServeProbe, len(c.children))
-	for i, ch := range c.children {
-		ctx, probes[i] = ch.ServeStarted(ctx)
+func (c *compositeAll) GRPCServeFailed(err error) {
+	for _, ch := range c.children {
+		ch.GRPCServeFailed(err)
 	}
-	return ctx, &compositeServeProbe{probes}
+}
+
+func (c *compositeAll) HTTPServeFailed(err error) {
+	for _, ch := range c.children {
+		ch.HTTPServeFailed(err)
+	}
+}
+
+func (c *compositeAll) StopStarted(ctx context.Context) (context.Context, server.StopProbe) {
+	probes := make([]server.StopProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.StopStarted(ctx)
+	}
+	return ctx, &compositeStopProbe{probes}
 }
 
 // --- composite probes: fan out each event to all children ---
@@ -198,11 +226,6 @@ func (m *compositeRotationCheckProbe) RotationCheckFailed(err error) {
 		p.RotationCheckFailed(err)
 	}
 }
-func (m *compositeRotationCheckProbe) ActiveKeyCacheUpdateFailed(err error) {
-	for _, p := range m.probes {
-		p.ActiveKeyCacheUpdateFailed(err)
-	}
-}
 func (m *compositeRotationCheckProbe) RotationCompleted(slot string) {
 	for _, p := range m.probes {
 		p.RotationCompleted(slot)
@@ -213,32 +236,45 @@ func (m *compositeRotationCheckProbe) RotationSkippedVersionRace(slot string) {
 		p.RotationSkippedVersionRace(slot)
 	}
 }
-func (m *compositeRotationCheckProbe) KeyProviderNotFound(prov, slot string) {
+func (m *compositeRotationCheckProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type compositeKeyCacheUpdateProbe struct{ probes []keys.KeyCacheUpdateProbe }
+
+func (m *compositeKeyCacheUpdateProbe) KeyCacheUpdateFailed(err error) {
+	for _, p := range m.probes {
+		p.KeyCacheUpdateFailed(err)
+	}
+}
+func (m *compositeKeyCacheUpdateProbe) KeyProviderNotFound(prov, slot string) {
 	for _, p := range m.probes {
 		p.KeyProviderNotFound(prov, slot)
 	}
 }
-func (m *compositeRotationCheckProbe) KeyHandleFailed(slot string, err error) {
+func (m *compositeKeyCacheUpdateProbe) KeyHandleFailed(slot string, err error) {
 	for _, p := range m.probes {
 		p.KeyHandleFailed(slot, err)
 	}
 }
-func (m *compositeRotationCheckProbe) PublicKeyFailed(slot string, err error) {
+func (m *compositeKeyCacheUpdateProbe) PublicKeyFailed(slot string, err error) {
 	for _, p := range m.probes {
 		p.PublicKeyFailed(slot, err)
 	}
 }
-func (m *compositeRotationCheckProbe) ThumbprintFailed(slot string, err error) {
+func (m *compositeKeyCacheUpdateProbe) ThumbprintFailed(slot string, err error) {
 	for _, p := range m.probes {
 		p.ThumbprintFailed(slot, err)
 	}
 }
-func (m *compositeRotationCheckProbe) MetadataFailed(slot string, err error) {
+func (m *compositeKeyCacheUpdateProbe) MetadataFailed(slot string, err error) {
 	for _, p := range m.probes {
 		p.MetadataFailed(slot, err)
 	}
 }
-func (m *compositeRotationCheckProbe) End() {
+func (m *compositeKeyCacheUpdateProbe) End() {
 	for _, p := range m.probes {
 		p.End()
 	}
@@ -285,13 +321,21 @@ func (m *compositeValidationProbe) End() {
 	}
 }
 
-type compositeCacheRefreshProbe struct{ probes []server.CacheRefreshProbe }
+type compositeInitPopulationProbe struct{ probes []server.InitPopulationProbe }
 
-func (m *compositeCacheRefreshProbe) InitialCachePopulationFailed(err error) {
+func (m *compositeInitPopulationProbe) InitialCachePopulationFailed(err error) {
 	for _, p := range m.probes {
 		p.InitialCachePopulationFailed(err)
 	}
 }
+func (m *compositeInitPopulationProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type compositeCacheRefreshProbe struct{ probes []server.CacheRefreshProbe }
+
 func (m *compositeCacheRefreshProbe) CacheRefreshFailed(err error) {
 	for _, p := range m.probes {
 		p.CacheRefreshFailed(err)
@@ -308,19 +352,9 @@ func (m *compositeCacheRefreshProbe) End() {
 	}
 }
 
-type compositeServeProbe struct{ probes []server.ServeProbe }
+type compositeStopProbe struct{ probes []server.StopProbe }
 
-func (m *compositeServeProbe) GRPCServeFailed(err error) {
-	for _, p := range m.probes {
-		p.GRPCServeFailed(err)
-	}
-}
-func (m *compositeServeProbe) HTTPServeFailed(err error) {
-	for _, p := range m.probes {
-		p.HTTPServeFailed(err)
-	}
-}
-func (m *compositeServeProbe) End() {
+func (m *compositeStopProbe) End() {
 	for _, p := range m.probes {
 		p.End()
 	}

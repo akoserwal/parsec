@@ -21,28 +21,28 @@ func NewLoggingServerLifecycleObserver(logger zerolog.Logger) *LoggingServerLife
 	return &LoggingServerLifecycleObserver{logger: logger}
 }
 
-func (o *LoggingServerLifecycleObserver) ServeStarted(ctx context.Context) (context.Context, server.ServeProbe) {
-	return ctx, &loggingServeProbe{
+func (o *LoggingServerLifecycleObserver) GRPCServeFailed(err error) {
+	o.logger.Error().Err(err).Msg("gRPC server error")
+}
+
+func (o *LoggingServerLifecycleObserver) HTTPServeFailed(err error) {
+	o.logger.Error().Err(err).Msg("HTTP server error")
+}
+
+func (o *LoggingServerLifecycleObserver) StopStarted(ctx context.Context) (context.Context, server.StopProbe) {
+	return ctx, &loggingStopProbe{
 		logger:    o.logger,
 		startTime: time.Now(),
 	}
 }
 
-type loggingServeProbe struct {
-	server.NoOpServeProbe
+type loggingStopProbe struct {
+	server.NoOpStopProbe
 	logger    zerolog.Logger
 	startTime time.Time
 }
 
-func (p *loggingServeProbe) GRPCServeFailed(err error) {
-	p.logger.Error().Err(err).Msg("gRPC server error")
-}
-
-func (p *loggingServeProbe) HTTPServeFailed(err error) {
-	p.logger.Error().Err(err).Msg("HTTP server error")
-}
-
-func (p *loggingServeProbe) End() {
+func (p *loggingStopProbe) End() {
 	p.logger.Debug().
 		Dur("duration", time.Since(p.startTime)).
 		Msg("server stopped")

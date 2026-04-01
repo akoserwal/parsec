@@ -73,21 +73,15 @@ func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 
 // Start begins the background cache refresh
 func (s *JWKSServer) Start(ctx context.Context) error {
-	// Populate cache immediately
-	ctx, p := s.observer.CacheRefreshStarted(ctx)
-	if err := s.refreshCache(ctx, p); err != nil {
-		p.InitialCachePopulationFailed(err)
+	ctx, initProbe := s.observer.InitPopulationStarted(ctx)
+	defer initProbe.End()
+	if err := s.refreshCache(ctx); err != nil {
+		initProbe.InitialCachePopulationFailed(err)
 	}
-	p.End()
 
-	// Start background refresh
 	s.ticker = s.clock.Ticker(s.refreshInterval)
 	return s.ticker.Start(func(ctx context.Context) {
-		ctx, p := s.observer.CacheRefreshStarted(ctx)
-		defer p.End()
-		if err := s.refreshCache(ctx, p); err != nil {
-			p.CacheRefreshFailed(err)
-		}
+		_ = s.refreshCache(ctx)
 	})
 }
 
@@ -101,31 +95,37 @@ func (s *JWKSServer) Stop() {
 // GetJWKS implements the JWKS service
 // Returns a cached JSON Web Key Set containing all public keys from all configured issuers
 func (s *JWKSServer) GetJWKS(ctx context.Context, req *parsecv1.GetJWKSRequest) (*parsecv1.GetJWKSResponse, error) {
-	// Try to serve from cache first
 	s.mu.RLock()
 	cachedResp := s.cachedResponse
 	cachedErr := s.cachedError
 	s.mu.RUnlock()
 
-	// If cache is populated, return it
 	if cachedResp != nil {
 		return cachedResp, nil
 	}
 
-	// If cache has an error and no response, return the error
 	if cachedErr != nil {
 		return nil, cachedErr
 	}
 
-	// Cache is empty (first request or failed initial population)
-	// Build the response synchronously to ensure immediate availability
-	ctx, p := s.observer.CacheRefreshStarted(ctx)
-	defer p.End()
-	return s.buildJWKSResponse(ctx, p)
+	// Cache is empty (first request or failed initial population).
+	// Refresh synchronously to ensure immediate availability.
+	_ = s.refreshCache(ctx)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.cachedResponse != nil {
+		return s.cachedResponse, nil
+	}
+	return nil, s.cachedError
 }
 
-// refreshCache updates the cached JWKS response in the background
-func (s *JWKSServer) refreshCache(ctx context.Context, p CacheRefreshProbe) error {
+// refreshCache builds a fresh JWKS response and updates the cache.
+// It creates its own probe via the observer for the duration of the operation.
+func (s *JWKSServer) refreshCache(ctx context.Context) error {
+	ctx, p := s.observer.CacheRefreshStarted(ctx)
+	defer p.End()
+
 	resp, err := s.buildJWKSResponse(ctx, p)
 
 	s.mu.Lock()
@@ -135,17 +135,19 @@ func (s *JWKSServer) refreshCache(ctx context.Context, p CacheRefreshProbe) erro
 		s.cachedResponse = resp
 		s.cachedError = nil
 	} else {
-		// Only cache the error if we don't have a previous successful response
-		// This ensures we keep serving stale data rather than failing
 		if s.cachedResponse == nil {
 			s.cachedError = err
 		}
 	}
 
+	if err != nil {
+		p.CacheRefreshFailed(err)
+	}
 	return err
 }
 
-// buildJWKSResponse builds a fresh JWKS response from all issuers
+// buildJWKSResponse builds a fresh JWKS response from all issuers.
+// It is a private helper of refreshCache (same logical operation).
 func (s *JWKSServer) buildJWKSResponse(ctx context.Context, p CacheRefreshProbe) (*parsecv1.GetJWKSResponse, error) {
 	// Get all public keys from all issuers at once
 	publicKeys, err := s.issuerRegistry.GetAllPublicKeys(ctx)

@@ -68,9 +68,13 @@ func TestNoOp_AllProbeMethodsCallable(t *testing.T) {
 	{
 		_, p := obs.RotationCheckStarted(ctx)
 		p.RotationCheckFailed(errors.New("x"))
-		p.ActiveKeyCacheUpdateFailed(errors.New("x"))
 		p.RotationCompleted("slot")
 		p.RotationSkippedVersionRace("slot")
+		p.End()
+	}
+	{
+		_, p := obs.KeyCacheUpdateStarted(ctx)
+		p.KeyCacheUpdateFailed(errors.New("x"))
 		p.KeyProviderNotFound("p", "s")
 		p.KeyHandleFailed("s", errors.New("x"))
 		p.PublicKeyFailed("s", errors.New("x"))
@@ -89,15 +93,20 @@ func TestNoOp_AllProbeMethodsCallable(t *testing.T) {
 		p.FilterEvaluationFailed("v", errors.New("x"))
 	}
 	{
-		_, p := obs.CacheRefreshStarted(ctx)
+		_, p := obs.InitPopulationStarted(ctx)
 		p.InitialCachePopulationFailed(errors.New("x"))
+		p.End()
+	}
+	{
+		_, p := obs.CacheRefreshStarted(ctx)
 		p.CacheRefreshFailed(errors.New("x"))
 		p.KeyConversionFailed("kid", errors.New("x"))
 	}
+	obs.GRPCServeFailed(errors.New("x"))
+	obs.HTTPServeFailed(errors.New("x"))
 	{
-		_, p := obs.ServeStarted(ctx)
-		p.GRPCServeFailed(errors.New("x"))
-		p.HTTPServeFailed(errors.New("x"))
+		_, p := obs.StopStarted(ctx)
+		p.End()
 	}
 }
 
@@ -161,9 +170,9 @@ func TestCompose_DelegatesToCorrectSubObserver(t *testing.T) {
 		t.Errorf("CacheRefreshStarted: expected JWKS observer called once, got %d", jwksCalled.Load())
 	}
 
-	obs.ServeStarted(ctx)
+	obs.StopStarted(ctx)
 	if srvCalled.Load() != 1 {
-		t.Errorf("ServeStarted: expected server lifecycle observer called once, got %d", srvCalled.Load())
+		t.Errorf("StopStarted: expected server lifecycle observer called once, got %d", srvCalled.Load())
 	}
 }
 
@@ -228,7 +237,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 	composite.KeyProvisionStarted(ctx)
 	composite.ValidationStarted(ctx)
 	composite.CacheRefreshStarted(ctx)
-	composite.ServeStarted(ctx)
+	composite.StopStarted(ctx)
 
 	for _, tc := range []struct {
 		name   string
@@ -372,7 +381,10 @@ func (s *spyLuaDSObserver) LuaFetchStarted(_ context.Context, _ string) (context
 	return datasource.NoOpObserver{}.LuaFetchStarted(context.Background(), "")
 }
 
-type spyKeyRotObserver struct{ called *atomic.Int32 }
+type spyKeyRotObserver struct {
+	keys.NoOpRotationObserver
+	called *atomic.Int32
+}
 
 func (s *spyKeyRotObserver) RotationCheckStarted(_ context.Context) (context.Context, keys.RotationCheckProbe) {
 	s.called.Add(1)
@@ -393,18 +405,24 @@ func (s *spyTrustObserver) ValidationStarted(_ context.Context) (context.Context
 	return trust.NoOpObserver{}.ValidationStarted(context.Background())
 }
 
-type spyJWKSObserver struct{ called *atomic.Int32 }
+type spyJWKSObserver struct {
+	server.NoOpJWKSObserver
+	called *atomic.Int32
+}
 
 func (s *spyJWKSObserver) CacheRefreshStarted(_ context.Context) (context.Context, server.CacheRefreshProbe) {
 	s.called.Add(1)
 	return server.NoOpObserver{}.CacheRefreshStarted(context.Background())
 }
 
-type spySrvLifeObserver struct{ called *atomic.Int32 }
+type spySrvLifeObserver struct {
+	server.NoOpLifecycleObserver
+	called *atomic.Int32
+}
 
-func (s *spySrvLifeObserver) ServeStarted(_ context.Context) (context.Context, server.ServeProbe) {
+func (s *spySrvLifeObserver) StopStarted(_ context.Context) (context.Context, server.StopProbe) {
 	s.called.Add(1)
-	return server.NoOpObserver{}.ServeStarted(context.Background())
+	return server.NoOpObserver{}.StopStarted(context.Background())
 }
 
 type spyServiceObserver struct {

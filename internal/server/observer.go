@@ -6,15 +6,22 @@ import "context"
 // Implementations should embed NoOpJWKSObserver for forward compatibility
 // with new methods added to this interface.
 type JWKSObserver interface {
+	// InitPopulationStarted is called when the initial JWKS cache population begins in Start.
+	InitPopulationStarted(ctx context.Context) (context.Context, InitPopulationProbe)
 	// CacheRefreshStarted is called when a JWKS cache build or refresh begins.
-	// Returns a potentially modified context and a probe to track the operation.
 	CacheRefreshStarted(ctx context.Context) (context.Context, CacheRefreshProbe)
+}
+
+// InitPopulationProbe tracks the initial JWKS cache population in Start.
+// Implementations should embed NoOpInitPopulationProbe for forward compatibility.
+type InitPopulationProbe interface {
+	InitialCachePopulationFailed(err error)
+	End()
 }
 
 // CacheRefreshProbe tracks a single JWKS cache refresh invocation.
 // Implementations should embed NoOpCacheRefreshProbe for forward compatibility.
 type CacheRefreshProbe interface {
-	InitialCachePopulationFailed(err error)
 	CacheRefreshFailed(err error)
 	KeyConversionFailed(keyID string, err error)
 	End()
@@ -24,16 +31,17 @@ type CacheRefreshProbe interface {
 // Implementations should embed NoOpLifecycleObserver for forward compatibility
 // with new methods added to this interface.
 type LifecycleObserver interface {
-	// ServeStarted is called when the server begins serving.
-	// Returns a potentially modified context and a probe to track the lifecycle.
-	ServeStarted(ctx context.Context) (context.Context, ServeProbe)
+	// GRPCServeFailed is a fire-and-forget event from an async goroutine.
+	GRPCServeFailed(err error)
+	// HTTPServeFailed is a fire-and-forget event from an async goroutine.
+	HTTPServeFailed(err error)
+	// StopStarted is called when graceful shutdown begins.
+	StopStarted(ctx context.Context) (context.Context, StopProbe)
 }
 
-// ServeProbe tracks server lifecycle events for one server instance.
-// Implementations should embed NoOpServeProbe for forward compatibility.
-type ServeProbe interface {
-	GRPCServeFailed(err error)
-	HTTPServeFailed(err error)
+// StopProbe tracks server graceful shutdown.
+// Implementations should embed NoOpStopProbe for forward compatibility.
+type StopProbe interface {
 	End()
 }
 
@@ -45,26 +53,34 @@ type ServerObserver interface {
 
 // --- NoOp implementations ---
 
+// NoOpInitPopulationProbe is a no-op implementation of InitPopulationProbe.
+// Embed this in concrete probe types for forward compatibility.
+type NoOpInitPopulationProbe struct{}
+
+func (NoOpInitPopulationProbe) InitialCachePopulationFailed(error) {}
+func (NoOpInitPopulationProbe) End()                               {}
+
 // NoOpCacheRefreshProbe is a no-op implementation of CacheRefreshProbe.
 // Embed this in concrete probe types for forward compatibility.
 type NoOpCacheRefreshProbe struct{}
 
-func (NoOpCacheRefreshProbe) InitialCachePopulationFailed(error) {}
-func (NoOpCacheRefreshProbe) CacheRefreshFailed(error)           {}
-func (NoOpCacheRefreshProbe) KeyConversionFailed(string, error)  {}
-func (NoOpCacheRefreshProbe) End()                               {}
+func (NoOpCacheRefreshProbe) CacheRefreshFailed(error)          {}
+func (NoOpCacheRefreshProbe) KeyConversionFailed(string, error) {}
+func (NoOpCacheRefreshProbe) End()                              {}
 
-// NoOpServeProbe is a no-op implementation of ServeProbe.
+// NoOpStopProbe is a no-op implementation of StopProbe.
 // Embed this in concrete probe types for forward compatibility.
-type NoOpServeProbe struct{}
+type NoOpStopProbe struct{}
 
-func (NoOpServeProbe) GRPCServeFailed(error) {}
-func (NoOpServeProbe) HTTPServeFailed(error) {}
-func (NoOpServeProbe) End()                  {}
+func (NoOpStopProbe) End() {}
 
 // NoOpJWKSObserver is a no-op implementation of JWKSObserver.
 // Embed this in concrete observer types for forward compatibility.
 type NoOpJWKSObserver struct{}
+
+func (NoOpJWKSObserver) InitPopulationStarted(ctx context.Context) (context.Context, InitPopulationProbe) {
+	return ctx, NoOpInitPopulationProbe{}
+}
 
 func (NoOpJWKSObserver) CacheRefreshStarted(ctx context.Context) (context.Context, CacheRefreshProbe) {
 	return ctx, NoOpCacheRefreshProbe{}
@@ -74,8 +90,10 @@ func (NoOpJWKSObserver) CacheRefreshStarted(ctx context.Context) (context.Contex
 // Embed this in concrete observer types for forward compatibility.
 type NoOpLifecycleObserver struct{}
 
-func (NoOpLifecycleObserver) ServeStarted(ctx context.Context) (context.Context, ServeProbe) {
-	return ctx, NoOpServeProbe{}
+func (NoOpLifecycleObserver) GRPCServeFailed(error) {}
+func (NoOpLifecycleObserver) HTTPServeFailed(error) {}
+func (NoOpLifecycleObserver) StopStarted(ctx context.Context) (context.Context, StopProbe) {
+	return ctx, NoOpStopProbe{}
 }
 
 // NoOpObserver satisfies both JWKSObserver and LifecycleObserver
