@@ -89,8 +89,21 @@ func TestNoOp_AllProbeMethodsCallable(t *testing.T) {
 		_, p := obs.ValidationStarted(ctx)
 		p.ValidatorFailed("v", trust.CredentialTypeJWT, errors.New("x"))
 		p.AllValidatorsFailed(trust.CredentialTypeBearer, 2, errors.New("x"))
+		p.End()
+	}
+	{
+		_, p := obs.ForActorStarted(ctx)
 		p.ValidatorFiltered("v", "actor")
 		p.FilterEvaluationFailed("v", errors.New("x"))
+		p.End()
+	}
+	{
+		_, p := obs.JWTValidateStarted(ctx, "https://issuer.example.com")
+		p.JWKSLookupFailed(errors.New("x"))
+		p.TokenExpired()
+		p.TokenInvalid(errors.New("x"))
+		p.ClaimsExtractionFailed(errors.New("x"))
+		p.End()
 	}
 	{
 		_, p := obs.InitPopulationStarted(ctx)
@@ -117,6 +130,8 @@ func TestCompose_DelegatesToCorrectSubObserver(t *testing.T) {
 		keyRotCalled  atomic.Int32
 		keyProvCalled atomic.Int32
 		trustCalled   atomic.Int32
+		filterCalled  atomic.Int32
+		jwtCalled     atomic.Int32
 		jwksCalled    atomic.Int32
 		srvCalled     atomic.Int32
 	)
@@ -131,7 +146,7 @@ func TestCompose_DelegatesToCorrectSubObserver(t *testing.T) {
 			keys.RotationObserver
 			keys.ProviderObserver
 		}{&spyKeyRotObserver{called: &keyRotCalled}, &spyKeyProvObserver{called: &keyProvCalled}},
-		&spyTrustObserver{called: &trustCalled},
+		&spyTrustObserver{called: &trustCalled, filterCalled: &filterCalled, jwtCalled: &jwtCalled},
 		struct {
 			server.JWKSObserver
 			server.LifecycleObserver
@@ -165,6 +180,16 @@ func TestCompose_DelegatesToCorrectSubObserver(t *testing.T) {
 		t.Errorf("ValidationStarted: expected trust observer called once, got %d", trustCalled.Load())
 	}
 
+	obs.ForActorStarted(ctx)
+	if filterCalled.Load() != 1 {
+		t.Errorf("ForActorStarted: expected filter observer called once, got %d", filterCalled.Load())
+	}
+
+	obs.JWTValidateStarted(ctx, "https://issuer.example.com")
+	if jwtCalled.Load() != 1 {
+		t.Errorf("JWTValidateStarted: expected JWT observer called once, got %d", jwtCalled.Load())
+	}
+
 	obs.CacheRefreshStarted(ctx)
 	if jwksCalled.Load() != 1 {
 		t.Errorf("CacheRefreshStarted: expected JWKS observer called once, got %d", jwksCalled.Load())
@@ -191,6 +216,8 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 		keyRot1, keyRot2   atomic.Int32
 		keyProv1, keyProv2 atomic.Int32
 		trust1, trust2     atomic.Int32
+		filter1, filter2   atomic.Int32
+		jwt1, jwt2         atomic.Int32
 		jwks1, jwks2       atomic.Int32
 		srv1, srv2         atomic.Int32
 	)
@@ -205,7 +232,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 			keys.RotationObserver
 			keys.ProviderObserver
 		}{&spyKeyRotObserver{called: &keyRot1}, &spyKeyProvObserver{called: &keyProv1}},
-		&spyTrustObserver{called: &trust1},
+		&spyTrustObserver{called: &trust1, filterCalled: &filter1, jwtCalled: &jwt1},
 		struct {
 			server.JWKSObserver
 			server.LifecycleObserver
@@ -221,7 +248,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 			keys.RotationObserver
 			keys.ProviderObserver
 		}{&spyKeyRotObserver{called: &keyRot2}, &spyKeyProvObserver{called: &keyProv2}},
-		&spyTrustObserver{called: &trust2},
+		&spyTrustObserver{called: &trust2, filterCalled: &filter2, jwtCalled: &jwt2},
 		struct {
 			server.JWKSObserver
 			server.LifecycleObserver
@@ -236,6 +263,8 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 	composite.RotationCheckStarted(ctx)
 	composite.KeyProvisionStarted(ctx)
 	composite.ValidationStarted(ctx)
+	composite.ForActorStarted(ctx)
+	composite.JWTValidateStarted(ctx, "https://issuer.example.com")
 	composite.CacheRefreshStarted(ctx)
 	composite.StopStarted(ctx)
 
@@ -247,7 +276,9 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 		{"LuaDataSource", &lua1, &lua2},
 		{"KeyRotation", &keyRot1, &keyRot2},
 		{"KeyProvider", &keyProv1, &keyProv2},
-		{"Trust", &trust1, &trust2},
+		{"TrustValidation", &trust1, &trust2},
+		{"TrustForActor", &filter1, &filter2},
+		{"JWTValidate", &jwt1, &jwt2},
 		{"JWKS", &jwks1, &jwks2},
 		{"ServerLifecycle", &srv1, &srv2},
 	} {
@@ -398,11 +429,25 @@ func (s *spyKeyProvObserver) KeyProvisionStarted(_ context.Context) (context.Con
 	return keys.NoOpObserver{}.KeyProvisionStarted(context.Background())
 }
 
-type spyTrustObserver struct{ called *atomic.Int32 }
+type spyTrustObserver struct {
+	called       *atomic.Int32
+	filterCalled *atomic.Int32
+	jwtCalled    *atomic.Int32
+}
 
 func (s *spyTrustObserver) ValidationStarted(_ context.Context) (context.Context, trust.ValidationProbe) {
 	s.called.Add(1)
 	return trust.NoOpObserver{}.ValidationStarted(context.Background())
+}
+
+func (s *spyTrustObserver) ForActorStarted(_ context.Context) (context.Context, trust.ForActorProbe) {
+	s.filterCalled.Add(1)
+	return trust.NoOpObserver{}.ForActorStarted(context.Background())
+}
+
+func (s *spyTrustObserver) JWTValidateStarted(_ context.Context, _ string) (context.Context, trust.JWTValidateProbe) {
+	s.jwtCalled.Add(1)
+	return trust.NoOpObserver{}.JWTValidateStarted(context.Background(), "")
 }
 
 type spyJWKSObserver struct {

@@ -10,26 +10,44 @@ import (
 )
 
 var (
-	_ trust.ValidationObserver = (*LoggingTrustValidationObserver)(nil)
-	_ trust.TrustObserver      = (*LoggingTrustValidationObserver)(nil)
+	_ trust.StoreObserver = (*LoggingTrustObserver)(nil)
+	_ trust.TrustObserver = (*LoggingTrustObserver)(nil)
 )
 
-// LoggingTrustValidationObserver logs trust validation events via zerolog.
-type LoggingTrustValidationObserver struct {
-	trust.NoOpValidationObserver
+// LoggingTrustObserver logs trust validation, filter, and JWT events via zerolog.
+type LoggingTrustObserver struct {
+	trust.NoOpStoreObserver
+	trust.NoOpFilteredStoreObserver
+	trust.NoOpJWTValidatorObserver
 	logger zerolog.Logger
 }
 
-func NewLoggingTrustValidationObserver(logger zerolog.Logger) *LoggingTrustValidationObserver {
-	return &LoggingTrustValidationObserver{logger: logger}
+func NewLoggingTrustObserver(logger zerolog.Logger) *LoggingTrustObserver {
+	return &LoggingTrustObserver{logger: logger}
 }
 
-func (o *LoggingTrustValidationObserver) ValidationStarted(ctx context.Context) (context.Context, trust.ValidationProbe) {
+func (o *LoggingTrustObserver) ValidationStarted(ctx context.Context) (context.Context, trust.ValidationProbe) {
 	return ctx, &loggingValidationProbe{
 		logger:    o.logger,
 		startTime: time.Now(),
 	}
 }
+
+func (o *LoggingTrustObserver) ForActorStarted(ctx context.Context) (context.Context, trust.ForActorProbe) {
+	return ctx, &loggingForActorProbe{
+		logger:    o.logger,
+		startTime: time.Now(),
+	}
+}
+
+func (o *LoggingTrustObserver) JWTValidateStarted(ctx context.Context, issuer string) (context.Context, trust.JWTValidateProbe) {
+	return ctx, &loggingJWTValidateProbe{
+		logger:    o.logger.With().Str("issuer", issuer).Logger(),
+		startTime: time.Now(),
+	}
+}
+
+// --- Store.Validate probe ---
 
 type loggingValidationProbe struct {
 	trust.NoOpValidationProbe
@@ -53,22 +71,73 @@ func (p *loggingValidationProbe) AllValidatorsFailed(credType trust.CredentialTy
 		Msg("all validators failed for credential type")
 }
 
-func (p *loggingValidationProbe) ValidatorFiltered(validatorName string, actorSubject string) {
+func (p *loggingValidationProbe) End() {
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("trust validation completed")
+}
+
+// --- FilteredStore.ForActor probe ---
+
+type loggingForActorProbe struct {
+	trust.NoOpForActorProbe
+	logger    zerolog.Logger
+	startTime time.Time
+}
+
+func (p *loggingForActorProbe) ValidatorFiltered(validatorName string, actorSubject string) {
 	p.logger.Debug().
 		Str("validator", validatorName).
 		Str("actor", actorSubject).
 		Msg("validator filtered out for actor")
 }
 
-func (p *loggingValidationProbe) FilterEvaluationFailed(validatorName string, err error) {
+func (p *loggingForActorProbe) FilterEvaluationFailed(validatorName string, err error) {
 	p.logger.Error().
 		Err(err).
 		Str("validator", validatorName).
 		Msg("filter evaluation failed")
 }
 
-func (p *loggingValidationProbe) End() {
+func (p *loggingForActorProbe) End() {
 	p.logger.Debug().
 		Dur("duration", time.Since(p.startTime)).
-		Msg("trust validation completed")
+		Msg("actor filter evaluation completed")
+}
+
+// --- JWTValidator.Validate probe ---
+
+type loggingJWTValidateProbe struct {
+	trust.NoOpJWTValidateProbe
+	logger    zerolog.Logger
+	startTime time.Time
+}
+
+func (p *loggingJWTValidateProbe) JWKSLookupFailed(err error) {
+	p.logger.Error().
+		Err(err).
+		Msg("JWKS lookup failed")
+}
+
+func (p *loggingJWTValidateProbe) TokenExpired() {
+	p.logger.Debug().
+		Msg("token expired")
+}
+
+func (p *loggingJWTValidateProbe) TokenInvalid(err error) {
+	p.logger.Debug().
+		Err(err).
+		Msg("token invalid")
+}
+
+func (p *loggingJWTValidateProbe) ClaimsExtractionFailed(err error) {
+	p.logger.Error().
+		Err(err).
+		Msg("claims extraction failed")
+}
+
+func (p *loggingJWTValidateProbe) End() {
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("JWT validation completed")
 }

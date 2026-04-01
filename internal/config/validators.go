@@ -10,10 +10,10 @@ import (
 )
 
 // NewTrustStore creates a trust store from configuration
-func NewTrustStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs trust.ValidationObserver) (trust.Store, error) {
+func NewTrustStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs trust.TrustObserver) (trust.Store, error) {
 	switch cfg.Type {
 	case "stub_store":
-		return newStubStore(cfg, transport)
+		return newStubStore(cfg, transport, trustObs)
 	case "filtered_store":
 		return newFilteredStore(cfg, transport, trustObs)
 	default:
@@ -22,12 +22,12 @@ func NewTrustStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs t
 }
 
 // newStubStore creates a stub trust store (no filtering)
-func newStubStore(cfg TrustStoreConfig, transport http.RoundTripper) (trust.Store, error) {
+func newStubStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs trust.TrustObserver) (trust.Store, error) {
 	store := trust.NewStubStore()
 
 	// Add validators
 	for _, validatorCfg := range cfg.Validators {
-		validator, err := newValidator(validatorCfg.ValidatorConfig, transport)
+		validator, err := newValidator(validatorCfg.ValidatorConfig, transport, trustObs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create validator: %w", err)
 		}
@@ -38,7 +38,7 @@ func newStubStore(cfg TrustStoreConfig, transport http.RoundTripper) (trust.Stor
 }
 
 // newFilteredStore creates a filtered trust store with validator filtering
-func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs trust.ValidationObserver) (trust.Store, error) {
+func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs trust.TrustObserver) (trust.Store, error) {
 	var opts []trust.FilteredStoreOption
 
 	// Add validator filter if configured
@@ -50,7 +50,7 @@ func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper, trustOb
 		opts = append(opts, trust.WithValidatorFilter(filter))
 	}
 
-	opts = append(opts, trust.WithValidationObserver(trustObs))
+	opts = append(opts, trust.WithObserver(trustObs))
 
 	store, err := trust.NewFilteredStore(opts...)
 	if err != nil {
@@ -63,7 +63,7 @@ func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper, trustOb
 			return nil, fmt.Errorf("validator name is required for filtered store")
 		}
 
-		validator, err := newValidator(validatorCfg.ValidatorConfig, transport)
+		validator, err := newValidator(validatorCfg.ValidatorConfig, transport, trustObs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create validator %s: %w", validatorCfg.Name, err)
 		}
@@ -75,10 +75,10 @@ func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper, trustOb
 }
 
 // newValidator creates a validator from configuration
-func newValidator(cfg ValidatorConfig, transport http.RoundTripper) (trust.Validator, error) {
+func newValidator(cfg ValidatorConfig, transport http.RoundTripper, trustObs trust.TrustObserver) (trust.Validator, error) {
 	switch cfg.Type {
 	case "jwt_validator":
-		return newJWTValidator(cfg, transport)
+		return newJWTValidator(cfg, transport, trustObs)
 	case "json_validator":
 		return newJSONValidator(cfg)
 	case "stub_validator":
@@ -89,7 +89,7 @@ func newValidator(cfg ValidatorConfig, transport http.RoundTripper) (trust.Valid
 }
 
 // newJWTValidator creates a JWT validator
-func newJWTValidator(cfg ValidatorConfig, transport http.RoundTripper) (trust.Validator, error) {
+func newJWTValidator(cfg ValidatorConfig, transport http.RoundTripper, trustObs trust.TrustObserver) (trust.Validator, error) {
 	if cfg.Issuer == "" {
 		return nil, fmt.Errorf("jwt_validator requires issuer")
 	}
@@ -118,6 +118,8 @@ func newJWTValidator(cfg ValidatorConfig, transport http.RoundTripper) (trust.Va
 			Transport: transport,
 		}
 	}
+
+	validatorCfg.Observer = trustObs
 
 	return trust.NewJWTValidator(validatorCfg)
 }

@@ -13,7 +13,7 @@ import (
 // Callers can pass additional options (e.g. WithCELFilter) as needed.
 func newTestFilteredStore(t *testing.T, opts ...FilteredStoreOption) *FilteredStore {
 	t.Helper()
-	allOpts := append([]FilteredStoreOption{WithValidationObserver(NoOpObserver{})}, opts...)
+	allOpts := append([]FilteredStoreOption{WithObserver(NoOpObserver{})}, opts...)
 	store, err := NewFilteredStore(allOpts...)
 	if err != nil {
 		t.Fatalf("failed to create filtered store: %v", err)
@@ -338,7 +338,7 @@ func TestFilteredStore_InvalidCELScript(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewFilteredStore(WithCELFilter(tt.script), WithValidationObserver(NoOpObserver{}))
+			_, err := NewFilteredStore(WithCELFilter(tt.script), WithObserver(NoOpObserver{}))
 			if err == nil {
 				t.Error("expected error for invalid script, got nil")
 			}

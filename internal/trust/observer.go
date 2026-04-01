@@ -2,54 +2,102 @@ package trust
 
 import "context"
 
-// ValidationObserver is called at key points during trust validation operations.
-// Implementations should embed NoOpValidationObserver for forward compatibility
-// with new methods added to this interface.
-type ValidationObserver interface {
-	// ValidationStarted is called when a trust validation operation begins.
-	// Returns a potentially modified context and a probe to track the operation.
+// StoreObserver is called at key points during Store.Validate operations.
+// Implementations should embed NoOpStoreObserver for forward compatibility.
+type StoreObserver interface {
 	ValidationStarted(ctx context.Context) (context.Context, ValidationProbe)
 }
 
-// ValidationProbe tracks a single trust validation invocation.
+// ValidationProbe tracks a single Store.Validate invocation.
 // Implementations should embed NoOpValidationProbe for forward compatibility.
 type ValidationProbe interface {
 	ValidatorFailed(validatorName string, credType CredentialType, err error)
 	AllValidatorsFailed(credType CredentialType, attempted int, lastErr error)
+	End()
+}
+
+// FilteredStoreObserver is called at key points during FilteredStore.ForActor.
+// Implementations should embed NoOpFilteredStoreObserver for forward compatibility.
+type FilteredStoreObserver interface {
+	ForActorStarted(ctx context.Context) (context.Context, ForActorProbe)
+}
+
+// ForActorProbe tracks a single FilteredStore.ForActor evaluation.
+// Implementations should embed NoOpForActorProbe for forward compatibility.
+type ForActorProbe interface {
 	ValidatorFiltered(validatorName string, actorSubject string)
 	FilterEvaluationFailed(validatorName string, err error)
 	End()
 }
 
+// JWTValidatorObserver is called at key points during JWTValidator.Validate.
+// Implementations should embed NoOpJWTValidatorObserver for forward compatibility.
+type JWTValidatorObserver interface {
+	JWTValidateStarted(ctx context.Context, issuer string) (context.Context, JWTValidateProbe)
+}
+
+// JWTValidateProbe tracks a single JWTValidator.Validate invocation.
+// Implementations should embed NoOpJWTValidateProbe for forward compatibility.
+type JWTValidateProbe interface {
+	JWKSLookupFailed(err error)
+	TokenExpired()
+	TokenInvalid(err error)
+	ClaimsExtractionFailed(err error)
+	End()
+}
+
 // TrustObserver is the per-package aggregate for all trust observer interfaces.
 type TrustObserver interface {
-	ValidationObserver
+	StoreObserver
+	FilteredStoreObserver
+	JWTValidatorObserver
 }
 
 // --- NoOp implementations ---
 
-// NoOpValidationProbe is a no-op implementation of ValidationProbe.
-// Embed this in concrete probe types for forward compatibility.
 type NoOpValidationProbe struct{}
 
 func (NoOpValidationProbe) ValidatorFailed(string, CredentialType, error)  {}
 func (NoOpValidationProbe) AllValidatorsFailed(CredentialType, int, error) {}
-func (NoOpValidationProbe) ValidatorFiltered(string, string)               {}
-func (NoOpValidationProbe) FilterEvaluationFailed(string, error)           {}
 func (NoOpValidationProbe) End()                                           {}
 
-// NoOpValidationObserver is a no-op implementation of ValidationObserver.
-// Embed this in concrete observer types for forward compatibility.
-type NoOpValidationObserver struct{}
+type NoOpForActorProbe struct{}
 
-func (NoOpValidationObserver) ValidationStarted(ctx context.Context) (context.Context, ValidationProbe) {
+func (NoOpForActorProbe) ValidatorFiltered(string, string)     {}
+func (NoOpForActorProbe) FilterEvaluationFailed(string, error) {}
+func (NoOpForActorProbe) End()                                 {}
+
+type NoOpJWTValidateProbe struct{}
+
+func (NoOpJWTValidateProbe) JWKSLookupFailed(error)       {}
+func (NoOpJWTValidateProbe) TokenExpired()                {}
+func (NoOpJWTValidateProbe) TokenInvalid(error)           {}
+func (NoOpJWTValidateProbe) ClaimsExtractionFailed(error) {}
+func (NoOpJWTValidateProbe) End()                         {}
+
+type NoOpStoreObserver struct{}
+
+func (NoOpStoreObserver) ValidationStarted(ctx context.Context) (context.Context, ValidationProbe) {
 	return ctx, NoOpValidationProbe{}
 }
 
-// NoOpObserver satisfies ValidationObserver with empty probes.
-// Useful in tests that don't care about observer events.
+type NoOpFilteredStoreObserver struct{}
+
+func (NoOpFilteredStoreObserver) ForActorStarted(ctx context.Context) (context.Context, ForActorProbe) {
+	return ctx, NoOpForActorProbe{}
+}
+
+type NoOpJWTValidatorObserver struct{}
+
+func (NoOpJWTValidatorObserver) JWTValidateStarted(ctx context.Context, _ string) (context.Context, JWTValidateProbe) {
+	return ctx, NoOpJWTValidateProbe{}
+}
+
+// NoOpObserver satisfies TrustObserver with empty probes.
 type NoOpObserver struct {
-	NoOpValidationObserver
+	NoOpStoreObserver
+	NoOpFilteredStoreObserver
+	NoOpJWTValidatorObserver
 }
 
 var _ TrustObserver = NoOpObserver{}

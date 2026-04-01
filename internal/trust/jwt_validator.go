@@ -24,6 +24,7 @@ type JWTValidator struct {
 	cache       *jwk.Cache
 	trustDomain string
 	clock       clock.Clock
+	observer    JWTValidatorObserver
 }
 
 // JWTValidatorConfig contains configuration for JWT validation
@@ -50,6 +51,9 @@ type JWTValidatorConfig struct {
 	// If nil, uses system clock
 	// This is useful for testing time-dependent behavior
 	Clock clock.Clock
+
+	// Observer for JWT validation events. If nil, a no-op observer is used.
+	Observer JWTValidatorObserver
 }
 
 // NewJWTValidator creates a new JWT validator with JWKS support
@@ -98,12 +102,18 @@ func NewJWTValidator(cfg JWTValidatorConfig) (*JWTValidator, error) {
 		clk = clock.NewSystemClock()
 	}
 
+	obs := cfg.Observer
+	if obs == nil {
+		obs = NoOpJWTValidatorObserver{}
+	}
+
 	return &JWTValidator{
 		issuer:      cfg.Issuer,
 		jwksURL:     jwksURL,
 		cache:       cache,
 		trustDomain: cfg.TrustDomain,
 		clock:       clk,
+		observer:    obs,
 	}, nil
 }
 
@@ -115,25 +125,25 @@ func (v *JWTValidator) CredentialTypes() []CredentialType {
 
 // Validate validates a JWT credential
 func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Result, error) {
-	// Type assertion to JWTCredential or BearerCredential
+	_, p := v.observer.JWTValidateStarted(ctx, v.issuer)
+	defer p.End()
+
 	var tokenString string
 	switch cred := credential.(type) {
 	case *JWTCredential:
 		tokenString = cred.Token
 	case *BearerCredential:
-		// Bearer credentials can also be JWTs
 		tokenString = cred.Token
 	default:
 		return nil, fmt.Errorf("unsupported credential type for JWT validator: %T", credential)
 	}
 
-	// Fetch the current JWKS
 	jwks, err := v.cache.Lookup(ctx, v.jwksURL)
 	if err != nil {
+		p.JWKSLookupFailed(err)
 		return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
 
-	// Parse and validate the JWT using the validator's clock
 	token, err := jwt.Parse(
 		[]byte(tokenString),
 		jwt.WithKeySet(jwks),
@@ -146,35 +156,35 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 	)
 	if err != nil {
 		if errors.Is(err, jwt.TokenExpiredError()) {
+			p.TokenExpired()
 			return nil, ErrExpiredToken
 		}
+		p.TokenInvalid(err)
 		return nil, fmt.Errorf("%w: %v", ErrInvalidToken, err)
 	}
 
-	// Ensure there is a subject
 	subject, ok := token.Subject()
 	if !ok || subject == "" {
 		return nil, fmt.Errorf("%w: missing subject claim", ErrInvalidToken)
 	}
 
-	// Extract all claims into our Claims type
 	allClaims := map[string]any{}
 	serialized, err := json.Marshal(token)
 	if err != nil {
+		p.ClaimsExtractionFailed(err)
 		return nil, fmt.Errorf("failed to serialize token claims: %w", err)
 	}
 	if err := json.Unmarshal(serialized, &allClaims); err != nil {
+		p.ClaimsExtractionFailed(err)
 		return nil, fmt.Errorf("failed to parse token claims: %w", err)
 	}
 
-	// TODO: Probably should add a ClaimsFilter to validator config so we can configure trust on a per-claim basis
+	// TODO: add a ClaimsFilter to validator config for per-claim trust configuration
 	claimsMap := make(claims.Claims)
 	maps.Copy(claimsMap, allClaims)
 
-	// Extract audience
 	audiences, _ := token.Audience()
 
-	// Extract scope (OAuth2/OIDC)
 	scope := ""
 	if err := token.Get("scope", &scope); err != nil {
 		scope = ""

@@ -195,7 +195,7 @@ func TestLoggingKeyProviderObserver_OldKeyDeletionFailed(t *testing.T) {
 
 func TestLoggingTrustValidationObserver_ValidatorFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewLoggingTrustValidationObserver(testLogger(&buf))
+	obs := NewLoggingTrustObserver(testLogger(&buf))
 	_, p := obs.ValidationStarted(context.Background())
 
 	p.ValidatorFailed("oidc_v1", trust.CredentialTypeJWT, errors.New("expired"))
@@ -206,7 +206,7 @@ func TestLoggingTrustValidationObserver_ValidatorFailed(t *testing.T) {
 
 func TestLoggingTrustValidationObserver_AllValidatorsFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewLoggingTrustValidationObserver(testLogger(&buf))
+	obs := NewLoggingTrustObserver(testLogger(&buf))
 	_, p := obs.ValidationStarted(context.Background())
 
 	p.AllValidatorsFailed(trust.CredentialTypeBearer, 3, errors.New("no match"))
@@ -217,8 +217,8 @@ func TestLoggingTrustValidationObserver_AllValidatorsFailed(t *testing.T) {
 
 func TestLoggingTrustValidationObserver_ValidatorFiltered(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewLoggingTrustValidationObserver(testLogger(&buf))
-	_, p := obs.ValidationStarted(context.Background())
+	obs := NewLoggingTrustObserver(testLogger(&buf))
+	_, p := obs.ForActorStarted(context.Background())
 
 	p.ValidatorFiltered("v1", "actor-xyz")
 
@@ -228,13 +228,48 @@ func TestLoggingTrustValidationObserver_ValidatorFiltered(t *testing.T) {
 
 func TestLoggingTrustValidationObserver_FilterEvaluationFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewLoggingTrustValidationObserver(testLogger(&buf))
-	_, p := obs.ValidationStarted(context.Background())
+	obs := NewLoggingTrustObserver(testLogger(&buf))
+	_, p := obs.ForActorStarted(context.Background())
 
 	p.FilterEvaluationFailed("v2", errors.New("cel error"))
 
 	assertLog(t, buf.String(), "error", "filter evaluation failed",
 		`"validator":"v2"`, `"error":"cel error"`)
+}
+
+// --- JWTValidator ---
+
+func TestLoggingTrustObserver_JWKSLookupFailed(t *testing.T) {
+	var buf bytes.Buffer
+	obs := NewLoggingTrustObserver(testLogger(&buf))
+	_, p := obs.JWTValidateStarted(context.Background(), "https://idp.example.com")
+
+	p.JWKSLookupFailed(errors.New("connection refused"))
+
+	assertLog(t, buf.String(), "error", "JWKS lookup failed",
+		`"issuer":"https://idp.example.com"`, `"error":"connection refused"`)
+}
+
+func TestLoggingTrustObserver_TokenExpired(t *testing.T) {
+	var buf bytes.Buffer
+	obs := NewLoggingTrustObserver(testLogger(&buf))
+	_, p := obs.JWTValidateStarted(context.Background(), "https://idp.example.com")
+
+	p.TokenExpired()
+
+	assertLog(t, buf.String(), "debug", "token expired",
+		`"issuer":"https://idp.example.com"`)
+}
+
+func TestLoggingTrustObserver_TokenInvalid(t *testing.T) {
+	var buf bytes.Buffer
+	obs := NewLoggingTrustObserver(testLogger(&buf))
+	_, p := obs.JWTValidateStarted(context.Background(), "https://idp.example.com")
+
+	p.TokenInvalid(errors.New("bad signature"))
+
+	assertLog(t, buf.String(), "debug", "token invalid",
+		`"issuer":"https://idp.example.com"`, `"error":"bad signature"`)
 }
 
 // --- JWKS InitPopulation ---

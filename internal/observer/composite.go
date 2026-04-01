@@ -111,6 +111,22 @@ func (c *compositeAll) ValidationStarted(ctx context.Context) (context.Context, 
 	return ctx, &compositeValidationProbe{probes}
 }
 
+func (c *compositeAll) ForActorStarted(ctx context.Context) (context.Context, trust.ForActorProbe) {
+	probes := make([]trust.ForActorProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.ForActorStarted(ctx)
+	}
+	return ctx, &compositeForActorProbe{probes}
+}
+
+func (c *compositeAll) JWTValidateStarted(ctx context.Context, issuer string) (context.Context, trust.JWTValidateProbe) {
+	probes := make([]trust.JWTValidateProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.JWTValidateStarted(ctx, issuer)
+	}
+	return ctx, &compositeJWTValidateProbe{probes}
+}
+
 func (c *compositeAll) InitPopulationStarted(ctx context.Context) (context.Context, server.InitPopulationProbe) {
 	probes := make([]server.InitPopulationProbe, len(c.children))
 	for i, ch := range c.children {
@@ -305,17 +321,53 @@ func (m *compositeValidationProbe) AllValidatorsFailed(ct trust.CredentialType, 
 		p.AllValidatorsFailed(ct, n, err)
 	}
 }
-func (m *compositeValidationProbe) ValidatorFiltered(name, actor string) {
+func (m *compositeValidationProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type compositeForActorProbe struct{ probes []trust.ForActorProbe }
+
+func (m *compositeForActorProbe) ValidatorFiltered(name, actor string) {
 	for _, p := range m.probes {
 		p.ValidatorFiltered(name, actor)
 	}
 }
-func (m *compositeValidationProbe) FilterEvaluationFailed(name string, err error) {
+func (m *compositeForActorProbe) FilterEvaluationFailed(name string, err error) {
 	for _, p := range m.probes {
 		p.FilterEvaluationFailed(name, err)
 	}
 }
-func (m *compositeValidationProbe) End() {
+func (m *compositeForActorProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type compositeJWTValidateProbe struct{ probes []trust.JWTValidateProbe }
+
+func (m *compositeJWTValidateProbe) JWKSLookupFailed(err error) {
+	for _, p := range m.probes {
+		p.JWKSLookupFailed(err)
+	}
+}
+func (m *compositeJWTValidateProbe) TokenExpired() {
+	for _, p := range m.probes {
+		p.TokenExpired()
+	}
+}
+func (m *compositeJWTValidateProbe) TokenInvalid(err error) {
+	for _, p := range m.probes {
+		p.TokenInvalid(err)
+	}
+}
+func (m *compositeJWTValidateProbe) ClaimsExtractionFailed(err error) {
+	for _, p := range m.probes {
+		p.ClaimsExtractionFailed(err)
+	}
+}
+func (m *compositeJWTValidateProbe) End() {
 	for _, p := range m.probes {
 		p.End()
 	}

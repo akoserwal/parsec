@@ -31,7 +31,7 @@ type FilteredStore struct {
 	validators []NamedValidator
 	// Filter for determining validator access
 	filter   ValidatorFilter
-	observer ValidationObserver
+	observer TrustObserver
 }
 
 // FilteredStoreOption is a functional option for configuring a FilteredStore
@@ -45,8 +45,8 @@ func WithValidatorFilter(filter ValidatorFilter) FilteredStoreOption {
 	}
 }
 
-// WithValidationObserver sets the observer for trust validation events.
-func WithValidationObserver(obs ValidationObserver) FilteredStoreOption {
+// WithObserver sets the observer for trust validation and filter events.
+func WithObserver(obs TrustObserver) FilteredStoreOption {
 	return func(s *FilteredStore) error {
 		s.observer = obs
 		return nil
@@ -147,7 +147,7 @@ func (s *FilteredStore) ForActor(ctx context.Context, actor *Result, requestAttr
 		return s, nil
 	}
 
-	_, p := s.observer.ValidationStarted(ctx)
+	_, p := s.observer.ForActorStarted(ctx)
 	defer p.End()
 
 	// Create a new filtered store inheriting filter and observer

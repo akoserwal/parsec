@@ -115,7 +115,7 @@ func newLoggingObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (observe
 		app,
 		probe.NewLoggingDataSourceObserver(dcLog, luaLog),
 		probe.NewLoggingKeysObserver(krLog, kpLog),
-		probe.NewLoggingTrustValidationObserver(tvLog),
+		probe.NewLoggingTrustObserver(tvLog),
 		probe.NewLoggingServerObserver(jcLog, slLog),
 	), nil
 }
