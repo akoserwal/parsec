@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -191,7 +192,7 @@ func newValidatorFilter(cfg ValidatorFilterConfig) (trust.ValidatorFilter, error
 // passthroughValidatorFilter allows all validators (no filtering)
 type passthroughValidatorFilter struct{}
 
-func (f *passthroughValidatorFilter) IsAllowed(actor *trust.Result, validatorName string, requestAttrs *request.RequestAttributes) (bool, error) {
+func (f *passthroughValidatorFilter) IsAllowed(_ context.Context, _ *trust.Result, _ string, _ *request.RequestAttributes) (bool, error) {
 	return true, nil
 }
 

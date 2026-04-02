@@ -9,9 +9,9 @@ import (
 
 // ValidatorFilter determines which validators an actor is allowed to use
 type ValidatorFilter interface {
-	// IsAllowed returns true if the actor is allowed to use the named validator
-	// The request attributes provide additional context about the request being made
-	IsAllowed(actor *Result, validatorName string, requestAttrs *request.RequestAttributes) (bool, error)
+	// IsAllowed returns true if the actor is allowed to use the named validator.
+	// The context carries tracing and cancellation signals.
+	IsAllowed(ctx context.Context, actor *Result, validatorName string, requestAttrs *request.RequestAttributes) (bool, error)
 }
 
 // NamedValidator associates a name with a Validator
@@ -31,7 +31,7 @@ type FilteredStore struct {
 	validators []NamedValidator
 	// Filter for determining validator access
 	filter   ValidatorFilter
-	observer TrustObserver
+	observer StoreObserver
 }
 
 // FilteredStoreOption is a functional option for configuring a FilteredStore
@@ -46,7 +46,7 @@ func WithValidatorFilter(filter ValidatorFilter) FilteredStoreOption {
 }
 
 // WithObserver sets the observer for trust validation and filter events.
-func WithObserver(obs TrustObserver) FilteredStoreOption {
+func WithObserver(obs StoreObserver) FilteredStoreOption {
 	return func(s *FilteredStore) error {
 		s.observer = obs
 		return nil
@@ -83,7 +83,7 @@ func NewFilteredStore(opts ...FilteredStoreOption) (*FilteredStore, error) {
 	}
 
 	if s.observer == nil {
-		s.observer = NoOpObserver{}
+		s.observer = NoOpStoreObserver{}
 	}
 
 	return s, nil
@@ -147,7 +147,7 @@ func (s *FilteredStore) ForActor(ctx context.Context, actor *Result, requestAttr
 		return s, nil
 	}
 
-	_, p := s.observer.ForActorStarted(ctx)
+	ctx, p := s.observer.ForActorStarted(ctx)
 	defer p.End()
 
 	// Create a new filtered store inheriting filter and observer
@@ -160,7 +160,7 @@ func (s *FilteredStore) ForActor(ctx context.Context, actor *Result, requestAttr
 
 	// Evaluate the filter for each validator
 	for _, nv := range s.validators {
-		allowed, err := s.filter.IsAllowed(actor, nv.Name, requestAttrs)
+		allowed, err := s.filter.IsAllowed(ctx, actor, nv.Name, requestAttrs)
 		if err != nil {
 			p.FilterEvaluationFailed(nv.Name, err)
 			return nil, fmt.Errorf("failed to evaluate filter for validator %s: %w", nv.Name, err)

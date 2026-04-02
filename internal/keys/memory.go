@@ -26,13 +26,22 @@ type InMemoryKeyProvider struct {
 	keys       map[string]*memoryKey // Current keys by namespace:keyName
 	oldKeys    []*memoryKey          // Keys scheduled for deletion
 	keyCounter int                   // Counter for generating unique key IDs
+	observer   InMemoryProviderObserver
 }
 
-// NewInMemoryKeyProvider creates a new in-memory key provider
-func NewInMemoryKeyProvider(keyType KeyType, algorithm string) *InMemoryKeyProvider {
+// InMemoryKeyProviderConfig configures the in-memory key provider.
+type InMemoryKeyProviderConfig struct {
+	KeyType   KeyType
+	Algorithm string
+	Observer  InMemoryProviderObserver
+}
+
+// NewInMemoryKeyProvider creates a new in-memory key provider.
+func NewInMemoryKeyProvider(cfg InMemoryKeyProviderConfig) *InMemoryKeyProvider {
+	// Determine default algorithm
+	algorithm := cfg.Algorithm
 	if algorithm == "" {
-		// Determine default algorithm
-		switch keyType {
+		switch cfg.KeyType {
 		case KeyTypeECP256:
 			algorithm = "ES256"
 		case KeyTypeECP384:
@@ -42,12 +51,18 @@ func NewInMemoryKeyProvider(keyType KeyType, algorithm string) *InMemoryKeyProvi
 		}
 	}
 
+	obs := cfg.Observer
+	if obs == nil {
+		obs = NoOpInMemoryProviderObserver{}
+	}
+
 	return &InMemoryKeyProvider{
-		keyType:    keyType,
+		keyType:    cfg.KeyType,
 		algorithm:  algorithm,
 		keys:       make(map[string]*memoryKey),
 		oldKeys:    make([]*memoryKey, 0),
 		keyCounter: 0,
+		observer:   obs,
 	}
 }
 
@@ -61,7 +76,10 @@ func (m *InMemoryKeyProvider) GetKeyHandle(ctx context.Context, trustDomain, nam
 	}, nil
 }
 
-func (m *InMemoryKeyProvider) rotateKey(trustDomain, namespace, keyName string) error {
+func (m *InMemoryKeyProvider) rotateKey(ctx context.Context, trustDomain, namespace, keyName string) error {
+	_, p := m.observer.MemoryRotateStarted(ctx)
+	defer p.End()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -89,6 +107,7 @@ func (m *InMemoryKeyProvider) rotateKey(trustDomain, namespace, keyName string) 
 		return fmt.Errorf("unsupported key type: %s", m.keyType)
 	}
 	if err != nil {
+		p.KeyGenerationFailed(err)
 		return fmt.Errorf("failed to generate key: %w", err)
 	}
 
@@ -185,5 +204,5 @@ func (h *memoryKeyHandle) Public(ctx context.Context) (crypto.PublicKey, error) 
 }
 
 func (h *memoryKeyHandle) Rotate(ctx context.Context) error {
-	return h.manager.rotateKey(h.trustDomain, h.namespace, h.keyName)
+	return h.manager.rotateKey(ctx, h.trustDomain, h.namespace, h.keyName)
 }

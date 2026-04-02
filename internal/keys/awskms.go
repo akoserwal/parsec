@@ -21,7 +21,7 @@ type AWSKMSKeyProvider struct {
 	keyType     KeyType
 	algorithm   string
 	aliasPrefix string
-	observer    ProviderObserver
+	observer    AWSKMSProviderObserver
 }
 
 // AWSKMSConfig configures the AWS KMS key provider
@@ -31,8 +31,7 @@ type AWSKMSConfig struct {
 	Region      string
 	AliasPrefix string
 	Client      *kms.Client
-	// Observer must be non-nil; use NoOpObserver{} in tests.
-	Observer ProviderObserver
+	Observer    AWSKMSProviderObserver
 }
 
 // NewAWSKMSKeyProvider creates a new AWS KMS key provider.
@@ -74,7 +73,7 @@ func NewAWSKMSKeyProvider(ctx context.Context, cfg AWSKMSConfig) (*AWSKMSKeyProv
 
 	obs := cfg.Observer
 	if obs == nil {
-		obs = NoOpObserver{}
+		obs = NoOpAWSKMSProviderObserver{}
 	}
 
 	return &AWSKMSKeyProvider{
@@ -96,7 +95,8 @@ func (m *AWSKMSKeyProvider) GetKeyHandle(ctx context.Context, trustDomain, names
 }
 
 func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespace, keyName string) error {
-	ctx, p := m.observer.KeyProvisionStarted(ctx)
+	aliasName := m.aliasName(trustDomain, namespace, keyName)
+	ctx, p := m.observer.KMSRotateStarted(ctx, aliasName)
 	defer p.End()
 
 	// 1. Create new KMS key (CMK) using configured keyType
@@ -110,17 +110,18 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 		KeyUsage: types.KeyUsageTypeSignVerify,
 	})
 	if err != nil {
+		p.CreateKeyFailed(err)
 		return fmt.Errorf("failed to create KMS key: %w", err)
 	}
 
 	newKeyID := aws.ToString(createResp.KeyMetadata.KeyId)
-	aliasName := m.aliasName(trustDomain, namespace, keyName)
 
 	// 2. Get current alias to find old key (if exists)
 	oldKeyID, err := m.getKeyIDFromAlias(ctx, aliasName)
 	if err != nil && oldKeyID == "" {
-		// Alias doesn't exist, that's fine
+		// Alias doesn't exist yet
 	} else if err != nil {
+		p.AliasCheckFailed(err)
 		return fmt.Errorf("failed to check existing alias: %w", err)
 	}
 
@@ -131,6 +132,7 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 			TargetKeyId: aws.String(newKeyID),
 		})
 		if err != nil {
+			p.AliasUpdateFailed(err)
 			return fmt.Errorf("failed to update alias: %w", err)
 		}
 	} else {
@@ -139,6 +141,7 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 			TargetKeyId: aws.String(newKeyID),
 		})
 		if err != nil {
+			p.AliasUpdateFailed(err)
 			return fmt.Errorf("failed to create alias: %w", err)
 		}
 	}

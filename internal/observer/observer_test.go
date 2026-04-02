@@ -82,8 +82,23 @@ func TestNoOp_AllProbeMethodsCallable(t *testing.T) {
 		p.MetadataFailed("s", errors.New("x"))
 	}
 	{
-		_, p := obs.KeyProvisionStarted(ctx)
+		_, p := obs.KMSRotateStarted(ctx, "alias/test")
+		p.CreateKeyFailed(errors.New("x"))
+		p.AliasCheckFailed(errors.New("x"))
+		p.AliasUpdateFailed(errors.New("x"))
 		p.OldKeyDeletionFailed("kid", errors.New("x"))
+		p.End()
+	}
+	{
+		_, p := obs.DiskRotateStarted(ctx, "/tmp/key.json")
+		p.KeyGenerationFailed(errors.New("x"))
+		p.KeyWriteFailed(errors.New("x"))
+		p.End()
+	}
+	{
+		_, p := obs.MemoryRotateStarted(ctx)
+		p.KeyGenerationFailed(errors.New("x"))
+		p.End()
 	}
 	{
 		_, p := obs.ValidationStarted(ctx)
@@ -125,15 +140,17 @@ func TestNoOp_AllProbeMethodsCallable(t *testing.T) {
 
 func TestCompose_DelegatesToCorrectSubObserver(t *testing.T) {
 	var (
-		cacheCalled   atomic.Int32
-		luaCalled     atomic.Int32
-		keyRotCalled  atomic.Int32
-		keyProvCalled atomic.Int32
-		trustCalled   atomic.Int32
-		filterCalled  atomic.Int32
-		jwtCalled     atomic.Int32
-		jwksCalled    atomic.Int32
-		srvCalled     atomic.Int32
+		cacheCalled  atomic.Int32
+		luaCalled    atomic.Int32
+		keyRotCalled atomic.Int32
+		kmsCalled    atomic.Int32
+		diskCalled   atomic.Int32
+		memCalled    atomic.Int32
+		trustCalled  atomic.Int32
+		filterCalled atomic.Int32
+		jwtCalled    atomic.Int32
+		jwksCalled   atomic.Int32
+		srvCalled    atomic.Int32
 	)
 
 	obs := Compose(
@@ -142,10 +159,7 @@ func TestCompose_DelegatesToCorrectSubObserver(t *testing.T) {
 			datasource.CacheObserver
 			datasource.LuaObserver
 		}{&spyDSCacheObserver{called: &cacheCalled}, &spyLuaDSObserver{called: &luaCalled}},
-		struct {
-			keys.RotationObserver
-			keys.ProviderObserver
-		}{&spyKeyRotObserver{called: &keyRotCalled}, &spyKeyProvObserver{called: &keyProvCalled}},
+		&spyKeysObserver{rotCalled: &keyRotCalled, kmsCalled: &kmsCalled, diskCalled: &diskCalled, memCalled: &memCalled},
 		&spyTrustObserver{called: &trustCalled, filterCalled: &filterCalled, jwtCalled: &jwtCalled},
 		struct {
 			server.JWKSObserver
@@ -170,9 +184,19 @@ func TestCompose_DelegatesToCorrectSubObserver(t *testing.T) {
 		t.Errorf("RotationCheckStarted: expected key rotation observer called once, got %d", keyRotCalled.Load())
 	}
 
-	obs.KeyProvisionStarted(ctx)
-	if keyProvCalled.Load() != 1 {
-		t.Errorf("KeyProvisionStarted: expected key provider observer called once, got %d", keyProvCalled.Load())
+	obs.KMSRotateStarted(ctx, "alias/test")
+	if kmsCalled.Load() != 1 {
+		t.Errorf("KMSRotateStarted: expected KMS observer called once, got %d", kmsCalled.Load())
+	}
+
+	obs.DiskRotateStarted(ctx, "/tmp/key.json")
+	if diskCalled.Load() != 1 {
+		t.Errorf("DiskRotateStarted: expected disk observer called once, got %d", diskCalled.Load())
+	}
+
+	obs.MemoryRotateStarted(ctx)
+	if memCalled.Load() != 1 {
+		t.Errorf("MemoryRotateStarted: expected memory observer called once, got %d", memCalled.Load())
 	}
 
 	obs.ValidationStarted(ctx)
@@ -211,15 +235,17 @@ func TestCompositeAll_SingleChild_ReturnsSame(t *testing.T) {
 
 func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 	var (
-		cache1, cache2     atomic.Int32
-		lua1, lua2         atomic.Int32
-		keyRot1, keyRot2   atomic.Int32
-		keyProv1, keyProv2 atomic.Int32
-		trust1, trust2     atomic.Int32
-		filter1, filter2   atomic.Int32
-		jwt1, jwt2         atomic.Int32
-		jwks1, jwks2       atomic.Int32
-		srv1, srv2         atomic.Int32
+		cache1, cache2   atomic.Int32
+		lua1, lua2       atomic.Int32
+		rot1, rot2       atomic.Int32
+		kms1, kms2       atomic.Int32
+		disk1, disk2     atomic.Int32
+		mem1, mem2       atomic.Int32
+		trust1, trust2   atomic.Int32
+		filter1, filter2 atomic.Int32
+		jwt1, jwt2       atomic.Int32
+		jwks1, jwks2     atomic.Int32
+		srv1, srv2       atomic.Int32
 	)
 
 	child1 := Compose(
@@ -228,10 +254,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 			datasource.CacheObserver
 			datasource.LuaObserver
 		}{&spyDSCacheObserver{called: &cache1}, &spyLuaDSObserver{called: &lua1}},
-		struct {
-			keys.RotationObserver
-			keys.ProviderObserver
-		}{&spyKeyRotObserver{called: &keyRot1}, &spyKeyProvObserver{called: &keyProv1}},
+		&spyKeysObserver{rotCalled: &rot1, kmsCalled: &kms1, diskCalled: &disk1, memCalled: &mem1},
 		&spyTrustObserver{called: &trust1, filterCalled: &filter1, jwtCalled: &jwt1},
 		struct {
 			server.JWKSObserver
@@ -244,10 +267,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 			datasource.CacheObserver
 			datasource.LuaObserver
 		}{&spyDSCacheObserver{called: &cache2}, &spyLuaDSObserver{called: &lua2}},
-		struct {
-			keys.RotationObserver
-			keys.ProviderObserver
-		}{&spyKeyRotObserver{called: &keyRot2}, &spyKeyProvObserver{called: &keyProv2}},
+		&spyKeysObserver{rotCalled: &rot2, kmsCalled: &kms2, diskCalled: &disk2, memCalled: &mem2},
 		&spyTrustObserver{called: &trust2, filterCalled: &filter2, jwtCalled: &jwt2},
 		struct {
 			server.JWKSObserver
@@ -261,7 +281,9 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 	composite.CacheFetchStarted(ctx, "ds")
 	composite.LuaFetchStarted(ctx, "lua")
 	composite.RotationCheckStarted(ctx)
-	composite.KeyProvisionStarted(ctx)
+	composite.KMSRotateStarted(ctx, "alias/test")
+	composite.DiskRotateStarted(ctx, "/tmp/key.json")
+	composite.MemoryRotateStarted(ctx)
 	composite.ValidationStarted(ctx)
 	composite.ForActorStarted(ctx)
 	composite.JWTValidateStarted(ctx, "https://issuer.example.com")
@@ -274,8 +296,10 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 	}{
 		{"DataSourceCache", &cache1, &cache2},
 		{"LuaDataSource", &lua1, &lua2},
-		{"KeyRotation", &keyRot1, &keyRot2},
-		{"KeyProvider", &keyProv1, &keyProv2},
+		{"KeyRotation", &rot1, &rot2},
+		{"KMSProvider", &kms1, &kms2},
+		{"DiskProvider", &disk1, &disk2},
+		{"MemoryProvider", &mem1, &mem2},
 		{"TrustValidation", &trust1, &trust2},
 		{"TrustForActor", &filter1, &filter2},
 		{"JWTValidate", &jwt1, &jwt2},
@@ -412,21 +436,32 @@ func (s *spyLuaDSObserver) LuaFetchStarted(_ context.Context, _ string) (context
 	return datasource.NoOpObserver{}.LuaFetchStarted(context.Background(), "")
 }
 
-type spyKeyRotObserver struct {
-	keys.NoOpRotationObserver
-	called *atomic.Int32
+type spyKeysObserver struct {
+	keys.NoOpObserver
+	rotCalled  *atomic.Int32
+	kmsCalled  *atomic.Int32
+	diskCalled *atomic.Int32
+	memCalled  *atomic.Int32
 }
 
-func (s *spyKeyRotObserver) RotationCheckStarted(_ context.Context) (context.Context, keys.RotationCheckProbe) {
-	s.called.Add(1)
-	return keys.NoOpObserver{}.RotationCheckStarted(context.Background())
+func (s *spyKeysObserver) RotationCheckStarted(ctx context.Context) (context.Context, keys.RotationCheckProbe) {
+	s.rotCalled.Add(1)
+	return ctx, keys.NoOpRotationCheckProbe{}
 }
 
-type spyKeyProvObserver struct{ called *atomic.Int32 }
+func (s *spyKeysObserver) KMSRotateStarted(ctx context.Context, _ string) (context.Context, keys.KMSRotateProbe) {
+	s.kmsCalled.Add(1)
+	return ctx, keys.NoOpKMSRotateProbe{}
+}
 
-func (s *spyKeyProvObserver) KeyProvisionStarted(_ context.Context) (context.Context, keys.KeyProvisionProbe) {
-	s.called.Add(1)
-	return keys.NoOpObserver{}.KeyProvisionStarted(context.Background())
+func (s *spyKeysObserver) DiskRotateStarted(ctx context.Context, _ string) (context.Context, keys.DiskRotateProbe) {
+	s.diskCalled.Add(1)
+	return ctx, keys.NoOpDiskRotateProbe{}
+}
+
+func (s *spyKeysObserver) MemoryRotateStarted(ctx context.Context) (context.Context, keys.MemoryRotateProbe) {
+	s.memCalled.Add(1)
+	return ctx, keys.NoOpMemoryRotateProbe{}
 }
 
 type spyTrustObserver struct {

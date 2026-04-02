@@ -1,6 +1,7 @@
 package trust
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -146,7 +147,7 @@ func NewCelValidatorFilter(script string) (*CelValidatorFilter, error) {
 }
 
 // IsAllowed implements the ValidatorFilter interface
-func (f *CelValidatorFilter) IsAllowed(actor *Result, validatorName string, requestAttrs *request.RequestAttributes) (bool, error) {
+func (f *CelValidatorFilter) IsAllowed(_ context.Context, actor *Result, validatorName string, requestAttrs *request.RequestAttributes) (bool, error) {
 	activation, err := CreateValidatorFilterActivation(actor, validatorName, requestAttrs)
 	if err != nil {
 		return false, err

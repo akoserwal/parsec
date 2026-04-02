@@ -53,7 +53,7 @@ func (h *failKeyHandle) Rotate(ctx context.Context) error {
 func newTestDualSlotRotatingSigner(t *testing.T, clk clock.Clock, slotStore KeySlotStore, keyProvider KeyProvider) (*DualSlotRotatingSigner, KeyProvider) {
 	if keyProvider == nil {
 		// Create an in-memory KeyProvider with EC-P256 key type
-		keyProvider = NewInMemoryKeyProvider(KeyTypeECP256, "ES256")
+		keyProvider = NewInMemoryKeyProvider(InMemoryKeyProviderConfig{KeyType: KeyTypeECP256, Algorithm: "ES256"})
 	}
 
 	// Create in-memory slot store if needed
@@ -87,7 +87,7 @@ func newTestDualSlotRotatingSigner(t *testing.T, clk clock.Clock, slotStore KeyS
 func TestDualSlotRotatingSigner_RotationFailure_MaintainsOldKey(t *testing.T) {
 	clk := clock.NewFixtureClock(time.Time{})
 
-	baseProvider := NewInMemoryKeyProvider(KeyTypeECP256, "ES256")
+	baseProvider := NewInMemoryKeyProvider(InMemoryKeyProviderConfig{KeyType: KeyTypeECP256, Algorithm: "ES256"})
 	stubProvider := &failKeyProvider{InMemoryKeyProvider: baseProvider}
 
 	rs, _ := newTestDualSlotRotatingSigner(t, clk, nil, stubProvider)
@@ -615,7 +615,7 @@ func TestDualSlotRotatingSigner_ExistingKeyInGracePeriod(t *testing.T) {
 
 func TestDualSlotRotatingSigner_Namespacing(t *testing.T) {
 	clk := clock.NewFixtureClock(time.Time{})
-	provider := NewInMemoryKeyProvider(KeyTypeECP256, "ES256")
+	provider := NewInMemoryKeyProvider(InMemoryKeyProviderConfig{KeyType: KeyTypeECP256, Algorithm: "ES256"})
 	providerRegistry := map[string]KeyProvider{"test-provider": provider}
 	slotStore := NewInMemoryKeySlotStore()
 

@@ -95,12 +95,28 @@ func (c *compositeAll) KeyCacheUpdateStarted(ctx context.Context) (context.Conte
 	return ctx, &compositeKeyCacheUpdateProbe{probes}
 }
 
-func (c *compositeAll) KeyProvisionStarted(ctx context.Context) (context.Context, keys.KeyProvisionProbe) {
-	probes := make([]keys.KeyProvisionProbe, len(c.children))
+func (c *compositeAll) KMSRotateStarted(ctx context.Context, alias string) (context.Context, keys.KMSRotateProbe) {
+	probes := make([]keys.KMSRotateProbe, len(c.children))
 	for i, ch := range c.children {
-		ctx, probes[i] = ch.KeyProvisionStarted(ctx)
+		ctx, probes[i] = ch.KMSRotateStarted(ctx, alias)
 	}
-	return ctx, &compositeKeyProvisionProbe{probes}
+	return ctx, &compositeKMSRotateProbe{probes}
+}
+
+func (c *compositeAll) DiskRotateStarted(ctx context.Context, keyPath string) (context.Context, keys.DiskRotateProbe) {
+	probes := make([]keys.DiskRotateProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.DiskRotateStarted(ctx, keyPath)
+	}
+	return ctx, &compositeDiskRotateProbe{probes}
+}
+
+func (c *compositeAll) MemoryRotateStarted(ctx context.Context) (context.Context, keys.MemoryRotateProbe) {
+	probes := make([]keys.MemoryRotateProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.MemoryRotateStarted(ctx)
+	}
+	return ctx, &compositeMemoryRotateProbe{probes}
 }
 
 func (c *compositeAll) ValidationStarted(ctx context.Context) (context.Context, trust.ValidationProbe) {
@@ -296,14 +312,60 @@ func (m *compositeKeyCacheUpdateProbe) End() {
 	}
 }
 
-type compositeKeyProvisionProbe struct{ probes []keys.KeyProvisionProbe }
+type compositeKMSRotateProbe struct{ probes []keys.KMSRotateProbe }
 
-func (m *compositeKeyProvisionProbe) OldKeyDeletionFailed(keyID string, err error) {
+func (m *compositeKMSRotateProbe) CreateKeyFailed(err error) {
+	for _, p := range m.probes {
+		p.CreateKeyFailed(err)
+	}
+}
+func (m *compositeKMSRotateProbe) AliasCheckFailed(err error) {
+	for _, p := range m.probes {
+		p.AliasCheckFailed(err)
+	}
+}
+func (m *compositeKMSRotateProbe) AliasUpdateFailed(err error) {
+	for _, p := range m.probes {
+		p.AliasUpdateFailed(err)
+	}
+}
+func (m *compositeKMSRotateProbe) OldKeyDeletionFailed(keyID string, err error) {
 	for _, p := range m.probes {
 		p.OldKeyDeletionFailed(keyID, err)
 	}
 }
-func (m *compositeKeyProvisionProbe) End() {
+func (m *compositeKMSRotateProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type compositeDiskRotateProbe struct{ probes []keys.DiskRotateProbe }
+
+func (m *compositeDiskRotateProbe) KeyGenerationFailed(err error) {
+	for _, p := range m.probes {
+		p.KeyGenerationFailed(err)
+	}
+}
+func (m *compositeDiskRotateProbe) KeyWriteFailed(err error) {
+	for _, p := range m.probes {
+		p.KeyWriteFailed(err)
+	}
+}
+func (m *compositeDiskRotateProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type compositeMemoryRotateProbe struct{ probes []keys.MemoryRotateProbe }
+
+func (m *compositeMemoryRotateProbe) KeyGenerationFailed(err error) {
+	for _, p := range m.probes {
+		p.KeyGenerationFailed(err)
+	}
+}
+func (m *compositeMemoryRotateProbe) End() {
 	for _, p := range m.probes {
 		p.End()
 	}

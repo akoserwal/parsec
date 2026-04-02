@@ -1,7 +1,6 @@
 package config
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -133,68 +132,6 @@ func (l *Loader) Get() (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 	return &cfg, nil
-}
-
-// Watch watches the config file for changes and calls onChange with the new config.
-// This runs until the context is cancelled or an error occurs.
-//
-// Note: Not all components can be safely hot-reloaded. Use with caution in production.
-// If no config file is configured, this will block until context is cancelled.
-func (l *Loader) Watch(ctx context.Context, onChange func(*Config) error) error {
-	// If no config file, just block until cancelled
-	if l.configPath == "" {
-		<-ctx.Done()
-		return ctx.Err()
-	}
-
-	// Use file provider with watch enabled
-	fp := file.Provider(l.configPath)
-
-	// Set up file watcher
-	if err := fp.Watch(func(event interface{}, err error) {
-		if err != nil {
-			return
-		}
-
-		parser, err := getParserForFile(l.configPath)
-		if err != nil {
-			return
-		}
-
-		k := koanf.New(".")
-		if err := k.Load(confmap.Provider(getDefaults(), "."), nil); err != nil {
-			return
-		}
-		if err := k.Load(fp, parser); err != nil {
-			return
-		}
-
-		if err := k.Load(env.Provider(".", env.Opt{
-			Prefix: "PARSEC_",
-			TransformFunc: func(k, v string) (string, any) {
-				return envTransform(k), v
-			},
-		}), nil); err != nil {
-			return
-		}
-
-		var cfg Config
-		if err := k.Unmarshal("", &cfg); err != nil {
-			return
-		}
-
-		l.k = k
-
-		if err := onChange(&cfg); err != nil {
-			_ = err
-		}
-	}); err != nil {
-		return fmt.Errorf("failed to watch config file: %w", err)
-	}
-
-	// Block until context is cancelled
-	<-ctx.Done()
-	return ctx.Err()
 }
 
 // getParserForFile returns the appropriate koanf parser based on file extension

@@ -36,17 +36,21 @@ func (o *LoggingDataSourceObserver) LuaFetchStarted(ctx context.Context, dataSou
 var _ datasource.DataSourceObserver = (*LoggingDataSourceObserver)(nil)
 
 // LoggingKeysObserver satisfies keys.KeysObserver
-// by combining rotation and provider logging observers.
+// by combining rotation and per-provider logging observers.
 type LoggingKeysObserver struct {
 	keys.NoOpObserver
 	rotation *LoggingKeyRotationObserver
-	provider *LoggingKeyProviderObserver
+	kms      *LoggingAWSKMSProviderObserver
+	disk     *LoggingDiskProviderObserver
+	memory   *LoggingInMemoryProviderObserver
 }
 
 func NewLoggingKeysObserver(rotationLogger, providerLogger zerolog.Logger) *LoggingKeysObserver {
 	return &LoggingKeysObserver{
 		rotation: NewLoggingKeyRotationObserver(rotationLogger),
-		provider: NewLoggingKeyProviderObserver(providerLogger),
+		kms:      NewLoggingAWSKMSProviderObserver(providerLogger),
+		disk:     NewLoggingDiskProviderObserver(providerLogger),
+		memory:   NewLoggingInMemoryProviderObserver(providerLogger),
 	}
 }
 
@@ -58,8 +62,16 @@ func (o *LoggingKeysObserver) KeyCacheUpdateStarted(ctx context.Context) (contex
 	return o.rotation.KeyCacheUpdateStarted(ctx)
 }
 
-func (o *LoggingKeysObserver) KeyProvisionStarted(ctx context.Context) (context.Context, keys.KeyProvisionProbe) {
-	return o.provider.KeyProvisionStarted(ctx)
+func (o *LoggingKeysObserver) KMSRotateStarted(ctx context.Context, alias string) (context.Context, keys.KMSRotateProbe) {
+	return o.kms.KMSRotateStarted(ctx, alias)
+}
+
+func (o *LoggingKeysObserver) DiskRotateStarted(ctx context.Context, keyPath string) (context.Context, keys.DiskRotateProbe) {
+	return o.disk.DiskRotateStarted(ctx, keyPath)
+}
+
+func (o *LoggingKeysObserver) MemoryRotateStarted(ctx context.Context) (context.Context, keys.MemoryRotateProbe) {
+	return o.memory.MemoryRotateStarted(ctx)
 }
 
 var _ keys.KeysObserver = (*LoggingKeysObserver)(nil)

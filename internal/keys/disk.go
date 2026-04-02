@@ -28,6 +28,7 @@ type DiskKeyProvider struct {
 	algorithm string        // The signing algorithm to use
 	keysPath  string        // Directory path for storing key files
 	fs        fs.FileSystem // Filesystem abstraction for operations
+	observer  DiskProviderObserver
 }
 
 // DiskKeyProviderConfig configures the disk key provider
@@ -43,6 +44,9 @@ type DiskKeyProviderConfig struct {
 
 	// FileSystem is an optional filesystem abstraction (defaults to OSFileSystem)
 	FileSystem fs.FileSystem
+
+	// Observer for disk key rotation events. If nil, a no-op observer is used.
+	Observer DiskProviderObserver
 }
 
 // keyFileData represents the JSON structure stored on disk
@@ -96,11 +100,17 @@ func NewDiskKeyProvider(cfg DiskKeyProviderConfig) (*DiskKeyProvider, error) {
 		return nil, fmt.Errorf("failed to create keys directory: %w", err)
 	}
 
+	obs := cfg.Observer
+	if obs == nil {
+		obs = NoOpDiskProviderObserver{}
+	}
+
 	return &DiskKeyProvider{
 		keyType:   cfg.KeyType,
 		algorithm: algorithm,
 		keysPath:  cfg.KeysPath,
 		fs:        filesystem,
+		observer:  obs,
 	}, nil
 }
 
@@ -113,7 +123,11 @@ func (m *DiskKeyProvider) GetKeyHandle(ctx context.Context, trustDomain, namespa
 	}, nil
 }
 
-func (m *DiskKeyProvider) rotateKey(trustDomain, namespace, keyName string) error {
+func (m *DiskKeyProvider) rotateKey(ctx context.Context, trustDomain, namespace, keyName string) error {
+	keyPath := m.keyFilePath(trustDomain, namespace, keyName)
+	_, p := m.observer.DiskRotateStarted(ctx, keyPath)
+	defer p.End()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -134,6 +148,7 @@ func (m *DiskKeyProvider) rotateKey(trustDomain, namespace, keyName string) erro
 		return fmt.Errorf("unsupported key type: %s", m.keyType)
 	}
 	if err != nil {
+		p.KeyGenerationFailed(err)
 		return fmt.Errorf("failed to generate key: %w", err)
 	}
 
@@ -143,6 +158,7 @@ func (m *DiskKeyProvider) rotateKey(trustDomain, namespace, keyName string) erro
 	// Marshal private key to PKCS8 DER format
 	privateKeyDER, err := x509.MarshalPKCS8PrivateKey(signer)
 	if err != nil {
+		p.KeyGenerationFailed(err)
 		return fmt.Errorf("failed to marshal private key: %w", err)
 	}
 
@@ -160,6 +176,7 @@ func (m *DiskKeyProvider) rotateKey(trustDomain, namespace, keyName string) erro
 
 	// Write to disk atomically
 	if err := m.writeKeyFile(trustDomain, namespace, keyName, &data); err != nil {
+		p.KeyWriteFailed(err)
 		return fmt.Errorf("failed to write key file: %w", err)
 	}
 
@@ -318,5 +335,5 @@ func (h *diskKeyHandle) Public(ctx context.Context) (crypto.PublicKey, error) {
 }
 
 func (h *diskKeyHandle) Rotate(ctx context.Context) error {
-	return h.manager.rotateKey(h.trustDomain, h.namespace, h.keyName)
+	return h.manager.rotateKey(ctx, h.trustDomain, h.namespace, h.keyName)
 }

@@ -62,8 +62,9 @@ func NewIssuerRegistry(cfg Config, obs observer.Observer) (service.Registry, err
 	return registry, nil
 }
 
-// buildKeyProviderRegistry creates a map of KeyProvider instances from configuration
-func buildKeyProviderRegistry(configs []KeyProviderConfig, providerObs keys.ProviderObserver) (map[string]keys.KeyProvider, error) {
+// buildKeyProviderRegistry creates a map of KeyProvider instances from configuration.
+// keysObs carries per-provider observer interfaces for each implementation type.
+func buildKeyProviderRegistry(configs []KeyProviderConfig, keysObs keys.KeysObserver) (map[string]keys.KeyProvider, error) {
 	registry := make(map[string]keys.KeyProvider)
 
 	for _, cfg := range configs {
@@ -86,7 +87,11 @@ func buildKeyProviderRegistry(configs []KeyProviderConfig, providerObs keys.Prov
 
 		switch cfg.Type {
 		case "", "memory":
-			provider = keys.NewInMemoryKeyProvider(keyType, cfg.Algorithm)
+			provider = keys.NewInMemoryKeyProvider(keys.InMemoryKeyProviderConfig{
+				KeyType:   keyType,
+				Algorithm: cfg.Algorithm,
+				Observer:  keysObs,
+			})
 
 		case "disk":
 			if cfg.KeysPath == "" {
@@ -96,6 +101,7 @@ func buildKeyProviderRegistry(configs []KeyProviderConfig, providerObs keys.Prov
 				KeyType:   keyType,
 				Algorithm: cfg.Algorithm,
 				KeysPath:  cfg.KeysPath,
+				Observer:  keysObs,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("failed to create disk key provider %s: %w", cfg.ID, err)
@@ -113,7 +119,7 @@ func buildKeyProviderRegistry(configs []KeyProviderConfig, providerObs keys.Prov
 				Algorithm:   cfg.Algorithm,
 				Region:      cfg.Region,
 				AliasPrefix: cfg.AliasPrefix,
-				Observer:    providerObs,
+				Observer:    keysObs,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("failed to create aws_kms key provider %s: %w", cfg.ID, err)

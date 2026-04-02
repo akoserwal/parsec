@@ -1,6 +1,7 @@
 package trust
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -22,14 +23,14 @@ func NewAnyValidatorFilter(filters ...ValidatorFilter) *AnyValidatorFilter {
 // IsAllowed implements the ValidatorFilter interface
 // Returns true if ANY of the sub-filters return true
 // Returns false only if ALL filters return false or error
-func (f *AnyValidatorFilter) IsAllowed(actor *Result, validatorName string, requestAttrs *request.RequestAttributes) (bool, error) {
+func (f *AnyValidatorFilter) IsAllowed(ctx context.Context, actor *Result, validatorName string, requestAttrs *request.RequestAttributes) (bool, error) {
 	if len(f.filters) == 0 {
 		return false, fmt.Errorf("no filters configured")
 	}
 
 	var errors []string
 	for i, filter := range f.filters {
-		allowed, err := filter.IsAllowed(actor, validatorName, requestAttrs)
+		allowed, err := filter.IsAllowed(ctx, actor, validatorName, requestAttrs)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("filter %d: %v", i, err))
 			continue

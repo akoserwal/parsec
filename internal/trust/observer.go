@@ -2,9 +2,11 @@ package trust
 
 import "context"
 
-// StoreObserver is called at key points during Store.Validate operations.
+// StoreObserver mirrors the Store component tree.
+// It embeds FilteredStoreObserver and adds the base Validate concern.
 // Implementations should embed NoOpStoreObserver for forward compatibility.
 type StoreObserver interface {
+	FilteredStoreObserver
 	ValidationStarted(ctx context.Context) (context.Context, ValidationProbe)
 }
 
@@ -49,7 +51,6 @@ type JWTValidateProbe interface {
 // TrustObserver is the per-package aggregate for all trust observer interfaces.
 type TrustObserver interface {
 	StoreObserver
-	FilteredStoreObserver
 	JWTValidatorObserver
 }
 
@@ -75,7 +76,9 @@ func (NoOpJWTValidateProbe) TokenInvalid(error)           {}
 func (NoOpJWTValidateProbe) ClaimsExtractionFailed(error) {}
 func (NoOpJWTValidateProbe) End()                         {}
 
-type NoOpStoreObserver struct{}
+type NoOpStoreObserver struct {
+	NoOpFilteredStoreObserver
+}
 
 func (NoOpStoreObserver) ValidationStarted(ctx context.Context) (context.Context, ValidationProbe) {
 	return ctx, NoOpValidationProbe{}
@@ -96,7 +99,6 @@ func (NoOpJWTValidatorObserver) JWTValidateStarted(ctx context.Context, _ string
 // NoOpObserver satisfies TrustObserver with empty probes.
 type NoOpObserver struct {
 	NoOpStoreObserver
-	NoOpFilteredStoreObserver
 	NoOpJWTValidatorObserver
 }
 

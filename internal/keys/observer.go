@@ -33,26 +33,52 @@ type KeyCacheUpdateProbe interface {
 	End()
 }
 
-// ProviderObserver is called at key points during key provisioning operations.
-// Implementations should embed NoOpProviderObserver for forward compatibility
-// with new methods added to this interface.
-type ProviderObserver interface {
-	// KeyProvisionStarted is called when a key provision operation begins.
-	// Returns a potentially modified context and a probe to track the operation.
-	KeyProvisionStarted(ctx context.Context) (context.Context, KeyProvisionProbe)
+// AWSKMSProviderObserver is called during AWS KMS key rotation.
+// Implementations should embed NoOpAWSKMSProviderObserver for forward compatibility.
+type AWSKMSProviderObserver interface {
+	KMSRotateStarted(ctx context.Context, alias string) (context.Context, KMSRotateProbe)
 }
 
-// KeyProvisionProbe tracks a single key provisioning invocation.
-// Implementations should embed NoOpKeyProvisionProbe for forward compatibility.
-type KeyProvisionProbe interface {
+// KMSRotateProbe tracks a single AWS KMS key rotation.
+type KMSRotateProbe interface {
+	CreateKeyFailed(err error)
+	AliasCheckFailed(err error)
+	AliasUpdateFailed(err error)
 	OldKeyDeletionFailed(keyID string, err error)
+	End()
+}
+
+// DiskProviderObserver is called during disk-based key rotation.
+// Implementations should embed NoOpDiskProviderObserver for forward compatibility.
+type DiskProviderObserver interface {
+	DiskRotateStarted(ctx context.Context, keyPath string) (context.Context, DiskRotateProbe)
+}
+
+// DiskRotateProbe tracks a single disk key rotation.
+type DiskRotateProbe interface {
+	KeyGenerationFailed(err error)
+	KeyWriteFailed(err error)
+	End()
+}
+
+// InMemoryProviderObserver is called during in-memory key rotation.
+// Implementations should embed NoOpInMemoryProviderObserver for forward compatibility.
+type InMemoryProviderObserver interface {
+	MemoryRotateStarted(ctx context.Context) (context.Context, MemoryRotateProbe)
+}
+
+// MemoryRotateProbe tracks a single in-memory key rotation.
+type MemoryRotateProbe interface {
+	KeyGenerationFailed(err error)
 	End()
 }
 
 // KeysObserver is the per-package aggregate for all keys observer interfaces.
 type KeysObserver interface {
 	RotationObserver
-	ProviderObserver
+	AWSKMSProviderObserver
+	DiskProviderObserver
+	InMemoryProviderObserver
 }
 
 // --- NoOp implementations ---
@@ -76,12 +102,6 @@ func (NoOpKeyCacheUpdateProbe) ThumbprintFailed(string, error)     {}
 func (NoOpKeyCacheUpdateProbe) MetadataFailed(string, error)       {}
 func (NoOpKeyCacheUpdateProbe) End()                               {}
 
-// NoOpKeyProvisionProbe is a no-op implementation of KeyProvisionProbe.
-type NoOpKeyProvisionProbe struct{}
-
-func (NoOpKeyProvisionProbe) OldKeyDeletionFailed(string, error) {}
-func (NoOpKeyProvisionProbe) End()                               {}
-
 // NoOpRotationObserver is a no-op implementation of RotationObserver.
 type NoOpRotationObserver struct{}
 
@@ -93,19 +113,49 @@ func (NoOpRotationObserver) KeyCacheUpdateStarted(ctx context.Context) (context.
 	return ctx, NoOpKeyCacheUpdateProbe{}
 }
 
-// NoOpProviderObserver is a no-op implementation of ProviderObserver.
-// Embed this in concrete observer types for forward compatibility.
-type NoOpProviderObserver struct{}
+type NoOpKMSRotateProbe struct{}
 
-func (NoOpProviderObserver) KeyProvisionStarted(ctx context.Context) (context.Context, KeyProvisionProbe) {
-	return ctx, NoOpKeyProvisionProbe{}
+func (NoOpKMSRotateProbe) CreateKeyFailed(error)              {}
+func (NoOpKMSRotateProbe) AliasCheckFailed(error)             {}
+func (NoOpKMSRotateProbe) AliasUpdateFailed(error)            {}
+func (NoOpKMSRotateProbe) OldKeyDeletionFailed(string, error) {}
+func (NoOpKMSRotateProbe) End()                               {}
+
+type NoOpAWSKMSProviderObserver struct{}
+
+func (NoOpAWSKMSProviderObserver) KMSRotateStarted(ctx context.Context, _ string) (context.Context, KMSRotateProbe) {
+	return ctx, NoOpKMSRotateProbe{}
 }
 
-// NoOpObserver satisfies both RotationObserver and ProviderObserver
-// with empty probes. Useful in tests that don't care about observer events.
+type NoOpDiskRotateProbe struct{}
+
+func (NoOpDiskRotateProbe) KeyGenerationFailed(error) {}
+func (NoOpDiskRotateProbe) KeyWriteFailed(error)      {}
+func (NoOpDiskRotateProbe) End()                      {}
+
+type NoOpDiskProviderObserver struct{}
+
+func (NoOpDiskProviderObserver) DiskRotateStarted(ctx context.Context, _ string) (context.Context, DiskRotateProbe) {
+	return ctx, NoOpDiskRotateProbe{}
+}
+
+type NoOpMemoryRotateProbe struct{}
+
+func (NoOpMemoryRotateProbe) KeyGenerationFailed(error) {}
+func (NoOpMemoryRotateProbe) End()                      {}
+
+type NoOpInMemoryProviderObserver struct{}
+
+func (NoOpInMemoryProviderObserver) MemoryRotateStarted(ctx context.Context) (context.Context, MemoryRotateProbe) {
+	return ctx, NoOpMemoryRotateProbe{}
+}
+
+// NoOpObserver satisfies KeysObserver with empty probes.
 type NoOpObserver struct {
 	NoOpRotationObserver
-	NoOpProviderObserver
+	NoOpAWSKMSProviderObserver
+	NoOpDiskProviderObserver
+	NoOpInMemoryProviderObserver
 }
 
 var _ KeysObserver = NoOpObserver{}

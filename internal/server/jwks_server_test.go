@@ -38,7 +38,7 @@ func startJWKSTestServer(t *testing.T, issuerRegistry service.Registry) *testEnv
 // key provider of the given type. Fails the test if the signer cannot start.
 func newTestSigner(t *testing.T, namespace string, keyType keys.KeyType, algo string) *keys.DualSlotRotatingSigner {
 	t.Helper()
-	kp := keys.NewInMemoryKeyProvider(keyType, algo)
+	kp := keys.NewInMemoryKeyProvider(keys.InMemoryKeyProviderConfig{KeyType: keyType, Algorithm: algo})
 	signer := keys.NewDualSlotRotatingSigner(keys.DualSlotRotatingSignerConfig{
 		Namespace:           namespace,
 		KeyProviderID:       "test-provider",

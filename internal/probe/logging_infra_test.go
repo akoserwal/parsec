@@ -178,17 +178,54 @@ func TestLoggingKeyRotationObserver_WarningMethods(t *testing.T) {
 	}
 }
 
-// --- KeyProvider ---
+// --- KMS Provider ---
 
-func TestLoggingKeyProviderObserver_OldKeyDeletionFailed(t *testing.T) {
+func TestLoggingAWSKMSProviderObserver_CreateKeyFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewLoggingKeyProviderObserver(testLogger(&buf))
-	_, p := obs.KeyProvisionStarted(context.Background())
+	obs := NewLoggingAWSKMSProviderObserver(testLogger(&buf))
+	_, p := obs.KMSRotateStarted(context.Background(), "alias/parsec/test")
+
+	p.CreateKeyFailed(errors.New("access denied"))
+
+	assertLog(t, buf.String(), "error", "KMS CreateKey failed",
+		`"error":"access denied"`)
+}
+
+func TestLoggingAWSKMSProviderObserver_OldKeyDeletionFailed(t *testing.T) {
+	var buf bytes.Buffer
+	obs := NewLoggingAWSKMSProviderObserver(testLogger(&buf))
+	_, p := obs.KMSRotateStarted(context.Background(), "alias/parsec/test")
 
 	p.OldKeyDeletionFailed("key-123", errors.New("access denied"))
 
-	assertLog(t, buf.String(), "warn", "failed to schedule old key for deletion",
+	assertLog(t, buf.String(), "warn", "failed to schedule old KMS key for deletion",
 		`"key_id":"key-123"`, `"error":"access denied"`)
+}
+
+// --- Disk Provider ---
+
+func TestLoggingDiskProviderObserver_KeyWriteFailed(t *testing.T) {
+	var buf bytes.Buffer
+	obs := NewLoggingDiskProviderObserver(testLogger(&buf))
+	_, p := obs.DiskRotateStarted(context.Background(), "/tmp/keys/test.json")
+
+	p.KeyWriteFailed(errors.New("permission denied"))
+
+	assertLog(t, buf.String(), "error", "disk key write failed",
+		`"error":"permission denied"`)
+}
+
+// --- InMemory Provider ---
+
+func TestLoggingInMemoryProviderObserver_KeyGenerationFailed(t *testing.T) {
+	var buf bytes.Buffer
+	obs := NewLoggingInMemoryProviderObserver(testLogger(&buf))
+	_, p := obs.MemoryRotateStarted(context.Background())
+
+	p.KeyGenerationFailed(errors.New("entropy exhausted"))
+
+	assertLog(t, buf.String(), "error", "in-memory key generation failed",
+		`"error":"entropy exhausted"`)
 }
 
 // --- TrustValidation ---
