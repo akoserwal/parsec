@@ -48,10 +48,17 @@ type JWTValidateProbe interface {
 	End()
 }
 
+// ValidatorObserver mirrors the Validator component tree.
+// It embeds JWTValidatorObserver and will embed future validator observers.
+// Implementations should embed NoOpValidatorObserver for forward compatibility.
+type ValidatorObserver interface {
+	JWTValidatorObserver
+}
+
 // TrustObserver is the per-package aggregate for all trust observer interfaces.
 type TrustObserver interface {
 	StoreObserver
-	JWTValidatorObserver
+	ValidatorObserver
 }
 
 // --- NoOp implementations ---
@@ -96,10 +103,14 @@ func (NoOpJWTValidatorObserver) JWTValidateStarted(ctx context.Context, _ string
 	return ctx, NoOpJWTValidateProbe{}
 }
 
+type NoOpValidatorObserver struct {
+	NoOpJWTValidatorObserver
+}
+
 // NoOpObserver satisfies TrustObserver with empty probes.
 type NoOpObserver struct {
 	NoOpStoreObserver
-	NoOpJWTValidatorObserver
+	NoOpValidatorObserver
 }
 
 var _ TrustObserver = NoOpObserver{}

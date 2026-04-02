@@ -73,12 +73,26 @@ type MemoryRotateProbe interface {
 	End()
 }
 
-// KeysObserver is the per-package aggregate for all keys observer interfaces.
-type KeysObserver interface {
+// RotatingSignerObserver mirrors the RotatingSigner component tree.
+// It embeds RotationObserver (DualSlotRotatingSigner level).
+// Implementations should embed NoOpRotatingSignerObserver for forward compatibility.
+type RotatingSignerObserver interface {
 	RotationObserver
+}
+
+// KeyProviderObserver mirrors the KeyProvider component tree.
+// It embeds all provider-specific observers.
+// Implementations should embed NoOpKeyProviderObserver for forward compatibility.
+type KeyProviderObserver interface {
 	AWSKMSProviderObserver
 	DiskProviderObserver
 	InMemoryProviderObserver
+}
+
+// KeysObserver is the per-package aggregate for all keys observer interfaces.
+type KeysObserver interface {
+	RotatingSignerObserver
+	KeyProviderObserver
 }
 
 // --- NoOp implementations ---
@@ -150,12 +164,20 @@ func (NoOpInMemoryProviderObserver) MemoryRotateStarted(ctx context.Context) (co
 	return ctx, NoOpMemoryRotateProbe{}
 }
 
-// NoOpObserver satisfies KeysObserver with empty probes.
-type NoOpObserver struct {
+type NoOpRotatingSignerObserver struct {
 	NoOpRotationObserver
+}
+
+type NoOpKeyProviderObserver struct {
 	NoOpAWSKMSProviderObserver
 	NoOpDiskProviderObserver
 	NoOpInMemoryProviderObserver
+}
+
+// NoOpObserver satisfies KeysObserver with empty probes.
+type NoOpObserver struct {
+	NoOpRotatingSignerObserver
+	NoOpKeyProviderObserver
 }
 
 var _ KeysObserver = NoOpObserver{}

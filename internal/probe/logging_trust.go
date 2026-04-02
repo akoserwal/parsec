@@ -17,7 +17,7 @@ var (
 // LoggingTrustObserver logs trust validation, filter, and JWT events via zerolog.
 type LoggingTrustObserver struct {
 	trust.NoOpStoreObserver
-	trust.NoOpJWTValidatorObserver
+	trust.NoOpValidatorObserver
 	logger zerolog.Logger
 }
 
