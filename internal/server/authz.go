@@ -52,7 +52,7 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 
 	// Use null object pattern - default to no-op observer if none provided
 	if observer == nil {
-		observer = service.NoOpAuthzCheckObserver()
+		observer = service.NoOpAuthzCheckObserver{}
 	}
 
 	return &AuthzServer{

@@ -120,76 +120,68 @@ type ServiceObserver interface {
 	AuthzCheckObserver
 }
 
-// NoOpTokenIssuanceProbe is an exported null object implementation of TokenIssuanceProbe.
-// Implementations can embed this to get default no-op behavior, allowing new methods
-// to be added to the interface without breaking existing implementations.
+// --- NoOp probe implementations ---
+
+// NoOpTokenIssuanceProbe is a no-op implementation of TokenIssuanceProbe.
+// Embed this in concrete probe types for forward compatibility.
 type NoOpTokenIssuanceProbe struct{}
 
-func (n *NoOpTokenIssuanceProbe) TokenTypeIssuanceStarted(tokenType TokenType)                 {}
-func (n *NoOpTokenIssuanceProbe) TokenTypeIssuanceSucceeded(tokenType TokenType, token *Token) {}
-func (n *NoOpTokenIssuanceProbe) TokenTypeIssuanceFailed(tokenType TokenType, err error)       {}
-func (n *NoOpTokenIssuanceProbe) IssuerNotFound(tokenType TokenType, err error)                {}
-func (n *NoOpTokenIssuanceProbe) End()                                                         {}
+func (NoOpTokenIssuanceProbe) TokenTypeIssuanceStarted(TokenType)           {}
+func (NoOpTokenIssuanceProbe) TokenTypeIssuanceSucceeded(TokenType, *Token) {}
+func (NoOpTokenIssuanceProbe) TokenTypeIssuanceFailed(TokenType, error)     {}
+func (NoOpTokenIssuanceProbe) IssuerNotFound(TokenType, error)              {}
+func (NoOpTokenIssuanceProbe) End()                                         {}
 
-// NoOpTokenExchangeProbe is an exported null object implementation of TokenExchangeProbe.
-// Implementations can embed this to get default no-op behavior.
+// NoOpTokenExchangeProbe is a no-op implementation of TokenExchangeProbe.
+// Embed this in concrete probe types for forward compatibility.
 type NoOpTokenExchangeProbe struct{}
 
-func (n *NoOpTokenExchangeProbe) ActorValidationSucceeded(actor *trust.Result)          {}
-func (n *NoOpTokenExchangeProbe) ActorValidationFailed(err error)                       {}
-func (n *NoOpTokenExchangeProbe) RequestContextParsed(attrs *request.RequestAttributes) {}
-func (n *NoOpTokenExchangeProbe) RequestContextParseFailed(err error)                   {}
-func (n *NoOpTokenExchangeProbe) SubjectTokenValidationSucceeded(subject *trust.Result) {}
-func (n *NoOpTokenExchangeProbe) SubjectTokenValidationFailed(err error)                {}
-func (n *NoOpTokenExchangeProbe) End()                                                  {}
+func (NoOpTokenExchangeProbe) ActorValidationSucceeded(*trust.Result)          {}
+func (NoOpTokenExchangeProbe) ActorValidationFailed(error)                     {}
+func (NoOpTokenExchangeProbe) RequestContextParsed(*request.RequestAttributes) {}
+func (NoOpTokenExchangeProbe) RequestContextParseFailed(error)                 {}
+func (NoOpTokenExchangeProbe) SubjectTokenValidationSucceeded(*trust.Result)   {}
+func (NoOpTokenExchangeProbe) SubjectTokenValidationFailed(error)              {}
+func (NoOpTokenExchangeProbe) End()                                            {}
 
-// NoOpAuthzCheckProbe is an exported null object implementation of AuthzCheckProbe.
-// Implementations can embed this to get default no-op behavior.
+// NoOpAuthzCheckProbe is a no-op implementation of AuthzCheckProbe.
+// Embed this in concrete probe types for forward compatibility.
 type NoOpAuthzCheckProbe struct{}
 
-func (n *NoOpAuthzCheckProbe) RequestAttributesParsed(attrs *request.RequestAttributes) {}
-func (n *NoOpAuthzCheckProbe) ActorValidationSucceeded(actor *trust.Result)             {}
-func (n *NoOpAuthzCheckProbe) ActorValidationFailed(err error)                          {}
-func (n *NoOpAuthzCheckProbe) SubjectCredentialExtracted(cred trust.Credential, headersUsed []string) {
-}
-func (n *NoOpAuthzCheckProbe) SubjectCredentialExtractionFailed(err error)      {}
-func (n *NoOpAuthzCheckProbe) SubjectValidationSucceeded(subject *trust.Result) {}
-func (n *NoOpAuthzCheckProbe) SubjectValidationFailed(err error)                {}
-func (n *NoOpAuthzCheckProbe) End()                                             {}
+func (NoOpAuthzCheckProbe) RequestAttributesParsed(*request.RequestAttributes)    {}
+func (NoOpAuthzCheckProbe) ActorValidationSucceeded(*trust.Result)                {}
+func (NoOpAuthzCheckProbe) ActorValidationFailed(error)                           {}
+func (NoOpAuthzCheckProbe) SubjectCredentialExtracted(trust.Credential, []string) {}
+func (NoOpAuthzCheckProbe) SubjectCredentialExtractionFailed(error)               {}
+func (NoOpAuthzCheckProbe) SubjectValidationSucceeded(*trust.Result)              {}
+func (NoOpAuthzCheckProbe) SubjectValidationFailed(error)                         {}
+func (NoOpAuthzCheckProbe) End()                                                  {}
 
-// NoOpServiceObserver implements ServiceObserver with no-op behavior.
-// Use this as a default when no observability is needed.
-type NoOpServiceObserver struct{}
+// --- NoOp observer implementations ---
 
-// NoOpTokenServiceObserver returns an observer that does nothing.
-// Use this as a default when no observability is needed.
-func NoOpTokenServiceObserver() TokenServiceObserver {
-	return &NoOpServiceObserver{}
+type NoOpTokenServiceObserver struct{}
+
+func (NoOpTokenServiceObserver) TokenIssuanceStarted(ctx context.Context, _ *trust.Result, _ *trust.Result, _ string, _ []TokenType) (context.Context, TokenIssuanceProbe) {
+	return ctx, NoOpTokenIssuanceProbe{}
 }
 
-// NoOpTokenExchangeObserver returns an observer that does nothing.
-func NoOpTokenExchangeObserver() TokenExchangeObserver {
-	return &NoOpServiceObserver{}
+type NoOpTokenExchangeObserver struct{}
+
+func (NoOpTokenExchangeObserver) TokenExchangeStarted(ctx context.Context, _ string, _ string, _ string, _ string) (context.Context, TokenExchangeProbe) {
+	return ctx, NoOpTokenExchangeProbe{}
 }
 
-// NoOpAuthzCheckObserver returns an observer that does nothing.
-func NoOpAuthzCheckObserver() AuthzCheckObserver {
-	return &NoOpServiceObserver{}
+type NoOpAuthzCheckObserver struct{}
+
+func (NoOpAuthzCheckObserver) AuthzCheckStarted(ctx context.Context) (context.Context, AuthzCheckProbe) {
+	return ctx, NoOpAuthzCheckProbe{}
 }
 
-// NoOpObserver returns an application observer that does nothing.
-func NoOpObserver() ServiceObserver {
-	return &NoOpServiceObserver{}
+// NoOpServiceObserver satisfies ServiceObserver with empty probes.
+type NoOpServiceObserver struct {
+	NoOpTokenServiceObserver
+	NoOpTokenExchangeObserver
+	NoOpAuthzCheckObserver
 }
 
-func (n *NoOpServiceObserver) TokenIssuanceStarted(ctx context.Context, subject *trust.Result, actor *trust.Result, scope string, tokenTypes []TokenType) (context.Context, TokenIssuanceProbe) {
-	return ctx, &NoOpTokenIssuanceProbe{}
-}
-
-func (n *NoOpServiceObserver) TokenExchangeStarted(ctx context.Context, grantType string, requestedTokenType string, audience string, scope string) (context.Context, TokenExchangeProbe) {
-	return ctx, &NoOpTokenExchangeProbe{}
-}
-
-func (n *NoOpServiceObserver) AuthzCheckStarted(ctx context.Context) (context.Context, AuthzCheckProbe) {
-	return ctx, &NoOpAuthzCheckProbe{}
-}
+var _ ServiceObserver = NoOpServiceObserver{}

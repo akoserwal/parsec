@@ -68,7 +68,7 @@ type (
 )
 
 // noopObserver satisfies Observer by embedding per-package NoOp types.
-// All 10 methods are promoted automatically — no hand-written forwarding needed.
+// All methods are promoted automatically — no hand-written forwarding needed.
 type noopObserver struct {
 	service.NoOpServiceObserver
 	noopDatasource

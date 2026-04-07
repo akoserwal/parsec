@@ -154,7 +154,7 @@ func TestCompose_DelegatesToCorrectSubObserver(t *testing.T) {
 	)
 
 	obs := Compose(
-		service.NoOpObserver(),
+		service.NoOpServiceObserver{},
 		struct {
 			datasource.CacheObserver
 			datasource.LuaObserver
@@ -249,7 +249,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 	)
 
 	child1 := Compose(
-		service.NoOpObserver(),
+		service.NoOpServiceObserver{},
 		struct {
 			datasource.CacheObserver
 			datasource.LuaObserver
@@ -262,7 +262,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 		}{&spyJWKSObserver{called: &jwks1}, &spySrvLifeObserver{called: &srv1}},
 	)
 	child2 := Compose(
-		service.NoOpObserver(),
+		service.NoOpServiceObserver{},
 		struct {
 			datasource.CacheObserver
 			datasource.LuaObserver
@@ -373,7 +373,7 @@ func TestCompositeAll_MultiProbe_FansOutEvents(t *testing.T) {
 	var hits1, hits2 atomic.Int32
 
 	child1 := Compose(
-		service.NoOpObserver(),
+		service.NoOpServiceObserver{},
 		struct {
 			datasource.CacheObserver
 			datasource.LuaObserver
@@ -383,7 +383,7 @@ func TestCompositeAll_MultiProbe_FansOutEvents(t *testing.T) {
 		server.NoOpObserver{},
 	)
 	child2 := Compose(
-		service.NoOpObserver(),
+		service.NoOpServiceObserver{},
 		struct {
 			datasource.CacheObserver
 			datasource.LuaObserver
@@ -514,15 +514,15 @@ type spyServiceObserver struct {
 
 func (s *spyServiceObserver) TokenIssuanceStarted(ctx context.Context, _ *trust.Result, _ *trust.Result, _ string, _ []service.TokenType) (context.Context, service.TokenIssuanceProbe) {
 	s.tokenIssuanceCalled.Add(1)
-	return ctx, &service.NoOpTokenIssuanceProbe{}
+	return ctx, service.NoOpTokenIssuanceProbe{}
 }
 
 func (s *spyServiceObserver) TokenExchangeStarted(ctx context.Context, _ string, _ string, _ string, _ string) (context.Context, service.TokenExchangeProbe) {
 	s.tokenExchangeCalled.Add(1)
-	return ctx, &service.NoOpTokenExchangeProbe{}
+	return ctx, service.NoOpTokenExchangeProbe{}
 }
 
 func (s *spyServiceObserver) AuthzCheckStarted(ctx context.Context) (context.Context, service.AuthzCheckProbe) {
 	s.authzCheckCalled.Add(1)
-	return ctx, &service.NoOpAuthzCheckProbe{}
+	return ctx, service.NoOpAuthzCheckProbe{}
 }

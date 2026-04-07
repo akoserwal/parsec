@@ -27,7 +27,7 @@ func NewTokenService(
 ) *TokenService {
 	// Use null object pattern - default to no-op observer if none provided
 	if observer == nil {
-		observer = NoOpTokenServiceObserver()
+		observer = NoOpTokenServiceObserver{}
 	}
 	return &TokenService{
 		trustDomain:    trustDomain,

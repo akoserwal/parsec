@@ -27,7 +27,7 @@ type ExchangeServer struct {
 func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenService, claimsFilterRegistry ClaimsFilterRegistry, observer service.TokenExchangeObserver) *ExchangeServer {
 	// Use null object pattern - default to no-op observer if none provided
 	if observer == nil {
-		observer = service.NoOpTokenExchangeObserver()
+		observer = service.NoOpTokenExchangeObserver{}
 	}
 	return &ExchangeServer{
 		trustStore:           trustStore,
