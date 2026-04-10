@@ -73,10 +73,10 @@ func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 
 // Start begins the background cache refresh
 func (s *JWKSServer) Start(ctx context.Context) error {
-	ctx, initProbe := s.observer.InitPopulationStarted(ctx)
-	defer initProbe.End()
+	ctx, p := s.observer.InitPopulationStarted(ctx)
+	defer p.End()
 	if err := s.refreshCache(ctx); err != nil {
-		initProbe.InitialCachePopulationFailed(err)
+		p.InitialCachePopulationFailed(err)
 	}
 
 	s.ticker = s.clock.Ticker(s.refreshInterval)
