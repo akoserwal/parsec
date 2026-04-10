@@ -12,6 +12,12 @@ import (
 )
 
 // CompositeAll builds an Observer that fans out every call to all children.
+//
+// The composite*Probe types below are intentionally repetitive: each mirrors a
+// domain probe interface with the same for-range fan-out. That keeps the
+// implementation obvious and lets var _ Observer = (*compositeAll)(nil) catch
+// interface drift. Shrinking this file would likely mean codegen, not shared
+// reflection helpers.
 func CompositeAll(children []Observer) Observer {
 	if len(children) == 1 {
 		return children[0]

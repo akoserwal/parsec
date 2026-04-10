@@ -14,7 +14,11 @@ var (
 	_ trust.TrustObserver = (*LoggingTrustObserver)(nil)
 )
 
-// LoggingTrustObserver logs trust validation, filter, and JWT events via zerolog.
+// LoggingTrustObserver logs trust validation, FilteredStore.ForActor, and
+// JWTValidator.Validate via zerolog. It satisfies trust.TrustObserver by
+// embedding trust.NoOpStoreObserver (store + filtered-store defaults) and
+// trust.NoOpValidatorObserver (JWT defaults), then overriding only the three
+// *Started factories that emit logs.
 type LoggingTrustObserver struct {
 	trust.NoOpStoreObserver
 	trust.NoOpValidatorObserver

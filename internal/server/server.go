@@ -186,7 +186,7 @@ func (s *Server) SetNotReady() {
 
 // Stop gracefully stops both servers
 func (s *Server) Stop(ctx context.Context) error {
-	_, p := s.observer.StopStarted(ctx)
+	ctx, p := s.observer.StopStarted(ctx)
 	defer p.End()
 
 	// Signal health watchers that all services are going away.

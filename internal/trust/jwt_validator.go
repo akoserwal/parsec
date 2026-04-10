@@ -125,7 +125,7 @@ func (v *JWTValidator) CredentialTypes() []CredentialType {
 
 // Validate validates a JWT credential
 func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Result, error) {
-	_, p := v.observer.JWTValidateStarted(ctx, v.issuer)
+	ctx, p := v.observer.JWTValidateStarted(ctx, v.issuer)
 	defer p.End()
 
 	var tokenString string
