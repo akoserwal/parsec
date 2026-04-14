@@ -112,13 +112,15 @@ func (ds *LuaDataSource) Name() string {
 
 // Fetch executes the Lua script to fetch data
 func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
-	ctx, p := ds.observer.LuaFetchStarted(ctx, ds.name)
+	// TODO(RHCLOUD-45xxx): propagate enriched context through Lua HTTP calls
+	// so request IDs and tracing spans are not lost within data sources.
+	_, p := ds.observer.LuaFetchStarted(ctx, ds.name)
 	defer p.End()
 
 	L := lua.NewState()
 	defer L.Close()
 
-	httpService := luaservices.NewHTTPServiceWithConfig(ds.httpConfig).WithContext(ctx)
+	httpService := luaservices.NewHTTPServiceWithConfig(ds.httpConfig)
 	httpService.Register(L)
 
 	configService := luaservices.NewConfigService(ds.configSource)

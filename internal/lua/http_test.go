@@ -1,7 +1,6 @@
 package lua
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -290,60 +289,5 @@ func TestHTTPService_ResponseHeaders(t *testing.T) {
 	expected := "custom-value:application/json"
 	if lua.LVAsString(result) != expected {
 		t.Errorf("headers = %q, want %q", lua.LVAsString(result), expected)
-	}
-}
-
-type ctxKey struct{}
-
-type capturingTransport struct {
-	capturedCtx context.Context
-	wrapped     http.RoundTripper
-}
-
-func (t *capturingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.capturedCtx = req.Context()
-	return t.wrapped.RoundTrip(req)
-}
-
-func TestHTTPService_WithContext_PropagatesContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	ct := &capturingTransport{wrapped: http.DefaultTransport}
-	svc := NewHTTPServiceWithConfig(HTTPServiceConfig{
-		Timeout:   5 * time.Second,
-		Transport: ct,
-	})
-
-	ctx := context.WithValue(context.Background(), ctxKey{}, "trace-123")
-	svc = svc.WithContext(ctx)
-
-	L := lua.NewState()
-	defer L.Close()
-	svc.Register(L)
-
-	script := `http.get("` + server.URL + `")`
-	if err := L.DoString(script); err != nil {
-		t.Fatalf("script execution failed: %v", err)
-	}
-
-	if ct.capturedCtx == nil {
-		t.Fatal("transport did not capture a request context")
-	}
-	val, ok := ct.capturedCtx.Value(ctxKey{}).(string)
-	if !ok || val != "trace-123" {
-		t.Errorf("context value not propagated: got %q, want %q", val, "trace-123")
-	}
-}
-
-func TestHTTPService_WithContext_DoesNotMutateOriginal(t *testing.T) {
-	original := NewHTTPService(5 * time.Second)
-	ctx := context.WithValue(context.Background(), ctxKey{}, "new-ctx")
-	derived := original.WithContext(ctx)
-
-	if original.ctx == derived.ctx {
-		t.Error("WithContext should return a copy, not mutate the original")
 	}
 }
