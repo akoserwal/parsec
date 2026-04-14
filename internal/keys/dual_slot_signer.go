@@ -174,7 +174,13 @@ func (r *DualSlotRotatingSigner) Stop() {
 
 // doRotationCheck is called periodically by the ticker to check for rotation needs
 func (r *DualSlotRotatingSigner) doRotationCheck(ctx context.Context) {
-	r.checkAndRotate(ctx)
+	ctx, p := r.observer.RotationCheckStarted(ctx)
+	defer p.End()
+
+	if err := r.doCheckAndRotate(ctx, p); err != nil {
+		p.RotationCheckFailed(err)
+	}
+	// Key-cache failures are reported on KeyCacheUpdateProbe inside updateActiveKeyCache.
 	_ = r.updateActiveKeyCache(ctx)
 }
 
@@ -285,16 +291,6 @@ func (r *DualSlotRotatingSigner) ensureInitialKey(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// checkAndRotate checks if rotation is needed and performs it using two-phase rotation
-func (r *DualSlotRotatingSigner) checkAndRotate(ctx context.Context) {
-	ctx, p := r.observer.RotationCheckStarted(ctx)
-	defer p.End()
-
-	if err := r.doCheckAndRotate(ctx, p); err != nil {
-		p.RotationCheckFailed(err)
-	}
 }
 
 func (r *DualSlotRotatingSigner) doCheckAndRotate(ctx context.Context, p RotationCheckProbe) error {
@@ -476,6 +472,7 @@ func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context) error
 
 	slots, _, err := r.slotStore.ListSlots(ctx)
 	if err != nil {
+		p.KeyCacheUpdateFailed(err)
 		return fmt.Errorf("failed to list slots: %w", err)
 	}
 
@@ -489,7 +486,9 @@ func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context) error
 	}
 
 	if len(mySlots) == 0 {
-		return errors.New("no slots available for this token type")
+		err := errors.New("no slots available for this token type")
+		p.KeyCacheUpdateFailed(err)
+		return err
 	}
 
 	now := r.clock.Now()
@@ -585,24 +584,32 @@ func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context) error
 	}
 
 	if activeSlot == nil {
-		return errors.New("no keys available")
+		err := errors.New("no keys available")
+		p.KeyCacheUpdateFailed(err)
+		return err
 	}
 
 	// Get the KeyProvider that created the active key
 	provider, ok := r.keyProviderRegistry[activeSlot.KeyProviderID]
 	if !ok {
-		return fmt.Errorf("key provider %s not found for active slot", activeSlot.KeyProviderID)
+		err := fmt.Errorf("key provider %s not found for active slot", activeSlot.KeyProviderID)
+		p.KeyCacheUpdateFailed(err)
+		return err
 	}
 
 	keyName := r.keyName(activeSlot.Position)
 	activeHandle, err := provider.GetKeyHandle(ctx, r.trustDomain, r.namespace, keyName)
 	if err != nil {
-		return fmt.Errorf("failed to get active handle %s: %w", activeSlot.Position, err)
+		err = fmt.Errorf("failed to get active handle %s: %w", activeSlot.Position, err)
+		p.KeyCacheUpdateFailed(err)
+		return err
 	}
 
 	internalID, algStr, err := activeHandle.Metadata(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get active metadata %s: %w", activeSlot.Position, err)
+		err = fmt.Errorf("failed to get active metadata %s: %w", activeSlot.Position, err)
+		p.KeyCacheUpdateFailed(err)
+		return err
 	}
 	alg := Algorithm(algStr)
 
