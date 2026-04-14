@@ -90,7 +90,7 @@ func TestNoOp_AllProbeMethodsCallable(t *testing.T) {
 		p.End()
 	}
 	{
-		_, p := obs.DiskRotateStarted(ctx, "/tmp/key.json")
+		_, p := obs.DiskRotateStarted(ctx, "td", "ns", "key")
 		p.KeyGenerationFailed(errors.New("x"))
 		p.KeyWriteFailed(errors.New("x"))
 		p.End()
@@ -189,7 +189,7 @@ func TestCompose_DelegatesToCorrectSubObserver(t *testing.T) {
 		t.Errorf("KMSRotateStarted: expected KMS observer called once, got %d", kmsCalled.Load())
 	}
 
-	obs.DiskRotateStarted(ctx, "/tmp/key.json")
+	obs.DiskRotateStarted(ctx, "td", "ns", "key")
 	if diskCalled.Load() != 1 {
 		t.Errorf("DiskRotateStarted: expected disk observer called once, got %d", diskCalled.Load())
 	}
@@ -282,7 +282,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 	composite.LuaFetchStarted(ctx, "lua")
 	composite.RotationCheckStarted(ctx)
 	composite.KMSRotateStarted(ctx, "alias/test")
-	composite.DiskRotateStarted(ctx, "/tmp/key.json")
+	composite.DiskRotateStarted(ctx, "td", "ns", "key")
 	composite.MemoryRotateStarted(ctx)
 	composite.ValidationStarted(ctx)
 	composite.ForActorStarted(ctx)
@@ -454,7 +454,7 @@ func (s *spyKeysObserver) KMSRotateStarted(ctx context.Context, _ string) (conte
 	return ctx, keys.NoOpKMSRotateProbe{}
 }
 
-func (s *spyKeysObserver) DiskRotateStarted(ctx context.Context, _ string) (context.Context, keys.DiskRotateProbe) {
+func (s *spyKeysObserver) DiskRotateStarted(ctx context.Context, _, _, _ string) (context.Context, keys.DiskRotateProbe) {
 	s.diskCalled.Add(1)
 	return ctx, keys.NoOpDiskRotateProbe{}
 }

@@ -51,7 +51,7 @@ type KMSRotateProbe interface {
 // DiskProviderObserver is called during disk-based key rotation.
 // Implementations should embed NoOpDiskProviderObserver for forward compatibility.
 type DiskProviderObserver interface {
-	DiskRotateStarted(ctx context.Context, keyPath string) (context.Context, DiskRotateProbe)
+	DiskRotateStarted(ctx context.Context, trustDomain string, namespace string, keyName string) (context.Context, DiskRotateProbe)
 }
 
 // DiskRotateProbe tracks a single disk key rotation.
@@ -149,7 +149,7 @@ func (NoOpDiskRotateProbe) End()                      {}
 
 type NoOpDiskProviderObserver struct{}
 
-func (NoOpDiskProviderObserver) DiskRotateStarted(ctx context.Context, _ string) (context.Context, DiskRotateProbe) {
+func (NoOpDiskProviderObserver) DiskRotateStarted(ctx context.Context, _, _, _ string) (context.Context, DiskRotateProbe) {
 	return ctx, NoOpDiskRotateProbe{}
 }
 

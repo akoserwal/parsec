@@ -207,7 +207,7 @@ func TestLoggingAWSKMSProviderObserver_OldKeyDeletionFailed(t *testing.T) {
 func TestLoggingDiskProviderObserver_KeyWriteFailed(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingDiskProviderObserver(testLogger(&buf))
-	_, p := obs.DiskRotateStarted(context.Background(), "/tmp/keys/test.json")
+	_, p := obs.DiskRotateStarted(context.Background(), "td", "ns", "test-key")
 
 	p.KeyWriteFailed(errors.New("permission denied"))
 

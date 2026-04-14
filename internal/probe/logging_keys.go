@@ -158,8 +158,12 @@ func NewLoggingDiskProviderObserver(logger zerolog.Logger) *LoggingDiskProviderO
 	return &LoggingDiskProviderObserver{logger: logger}
 }
 
-func (o *LoggingDiskProviderObserver) DiskRotateStarted(ctx context.Context, keyPath string) (context.Context, keys.DiskRotateProbe) {
-	o.logger.Info().Str("key_path", keyPath).Msg("disk key rotation started")
+func (o *LoggingDiskProviderObserver) DiskRotateStarted(ctx context.Context, trustDomain, namespace, keyName string) (context.Context, keys.DiskRotateProbe) {
+	o.logger.Info().
+		Str("trust_domain", trustDomain).
+		Str("namespace", namespace).
+		Str("key_name", keyName).
+		Msg("disk key rotation started")
 	return ctx, &loggingDiskRotateProbe{
 		logger:    o.logger,
 		startTime: time.Now(),

@@ -109,10 +109,10 @@ func (c *compositeAll) KMSRotateStarted(ctx context.Context, alias string) (cont
 	return ctx, &compositeKMSRotateProbe{probes}
 }
 
-func (c *compositeAll) DiskRotateStarted(ctx context.Context, keyPath string) (context.Context, keys.DiskRotateProbe) {
+func (c *compositeAll) DiskRotateStarted(ctx context.Context, trustDomain, namespace, keyName string) (context.Context, keys.DiskRotateProbe) {
 	probes := make([]keys.DiskRotateProbe, len(c.children))
 	for i, ch := range c.children {
-		ctx, probes[i] = ch.DiskRotateStarted(ctx, keyPath)
+		ctx, probes[i] = ch.DiskRotateStarted(ctx, trustDomain, namespace, keyName)
 	}
 	return ctx, &compositeDiskRotateProbe{probes}
 }

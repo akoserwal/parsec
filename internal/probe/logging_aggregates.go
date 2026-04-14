@@ -66,8 +66,8 @@ func (o *LoggingKeysObserver) KMSRotateStarted(ctx context.Context, alias string
 	return o.kms.KMSRotateStarted(ctx, alias)
 }
 
-func (o *LoggingKeysObserver) DiskRotateStarted(ctx context.Context, keyPath string) (context.Context, keys.DiskRotateProbe) {
-	return o.disk.DiskRotateStarted(ctx, keyPath)
+func (o *LoggingKeysObserver) DiskRotateStarted(ctx context.Context, trustDomain, namespace, keyName string) (context.Context, keys.DiskRotateProbe) {
+	return o.disk.DiskRotateStarted(ctx, trustDomain, namespace, keyName)
 }
 
 func (o *LoggingKeysObserver) MemoryRotateStarted(ctx context.Context) (context.Context, keys.MemoryRotateProbe) {
