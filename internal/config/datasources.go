@@ -72,18 +72,45 @@ func newLuaDataSource(cfg DataSourceConfig, transport http.RoundTripper, obs obs
 		httpConfig = httpCfg
 	}
 
-	// Create base Lua data source
-	luaDSConfig := datasource.LuaDataSourceConfig{
-		Name:         cfg.Name,
-		Script:       script,
-		ConfigSource: configSource,
-		HTTPConfig:   httpConfig,
-		Observer:     obs,
-	}
+	var baseDS service.DataSource
 
-	baseDS, err := datasource.NewLuaDataSource(luaDSConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create lua data source: %w", err)
+	if cfg.CacheKeyFunc != "" {
+		var cacheTTL time.Duration
+		if cfg.LuaCacheTTL != "" {
+			var err error
+			cacheTTL, err = time.ParseDuration(cfg.LuaCacheTTL)
+			if err != nil {
+				return nil, fmt.Errorf("invalid lua_cache_ttl: %w", err)
+			}
+		}
+
+		cacheable, err := datasource.NewCacheableLuaDataSource(datasource.CacheableLuaDataSourceConfig{
+			Name:         cfg.Name,
+			Script:       script,
+			ConfigSource: configSource,
+			HTTPConfig:   httpConfig,
+			Observer:     obs,
+			CacheKeyFunc: cfg.CacheKeyFunc,
+			CacheTTL:     cacheTTL,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create cacheable lua data source: %w", err)
+		}
+		baseDS = cacheable
+	} else {
+		luaDSConfig := datasource.LuaDataSourceConfig{
+			Name:         cfg.Name,
+			Script:       script,
+			ConfigSource: configSource,
+			HTTPConfig:   httpConfig,
+			Observer:     obs,
+		}
+
+		var err error
+		baseDS, err = datasource.NewLuaDataSource(luaDSConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create lua data source: %w", err)
+		}
 	}
 
 	if cfg.Caching != nil {

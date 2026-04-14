@@ -368,6 +368,10 @@ type CacheableLuaDataSourceConfig struct {
 	// If nil, default HTTP config (30s timeout, no fixtures) will be used
 	HTTPConfig *luaservices.HTTPServiceConfig
 
+	// Observer for Lua-specific execution events on the inner Lua data source.
+	// If nil, NewLuaDataSource substitutes NoOpObserver{}.
+	Observer LuaObserver
+
 	// CacheKeyFunc is the name of the Lua function that generates cache keys
 	// REQUIRED - the function should take an input table and return a modified input table
 	// with only the fields relevant for caching
@@ -399,6 +403,7 @@ func NewCacheableLuaDataSource(config CacheableLuaDataSourceConfig) (*CacheableL
 		Script:       config.Script,
 		ConfigSource: config.ConfigSource,
 		HTTPConfig:   config.HTTPConfig,
+		Observer:     config.Observer,
 	})
 	if err != nil {
 		return nil, err

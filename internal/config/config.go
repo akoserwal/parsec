@@ -143,6 +143,15 @@ type DataSourceConfig struct {
 	// HTTP configuration
 	HTTPConfig *HTTPConfig `koanf:"http"`
 
+	// CacheKeyFunc names the Lua global that implements cache key masking. When non-empty,
+	// the data source is built as datasource.CacheableLuaDataSource (script must define
+	// fetch and this function). Observer wiring matches a plain Lua data source.
+	CacheKeyFunc string `koanf:"cache_key_func"`
+
+	// LuaCacheTTL is a duration string (e.g. "5m") for CacheableLuaDataSource.CacheTTL.
+	// Empty uses the datasource package default when creating a cacheable Lua source.
+	LuaCacheTTL string `koanf:"lua_cache_ttl"`
+
 	// Caching configuration
 	Caching *CachingConfig `koanf:"caching"`
 }
