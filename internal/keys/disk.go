@@ -125,11 +125,8 @@ func (m *DiskKeyProvider) GetKeyHandle(ctx context.Context, trustDomain, namespa
 
 func (m *DiskKeyProvider) rotateKey(ctx context.Context, trustDomain, namespace, keyName string) error {
 	keyPath := m.keyFilePath(trustDomain, namespace, keyName)
-	ctx, p := m.observer.DiskRotateStarted(ctx, keyPath)
+	_, p := m.observer.DiskRotateStarted(ctx, keyPath)
 	defer p.End()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()

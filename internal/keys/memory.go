@@ -77,11 +77,8 @@ func (m *InMemoryKeyProvider) GetKeyHandle(ctx context.Context, trustDomain, nam
 }
 
 func (m *InMemoryKeyProvider) rotateKey(ctx context.Context, trustDomain, namespace, keyName string) error {
-	ctx, p := m.observer.MemoryRotateStarted(ctx)
+	_, p := m.observer.MemoryRotateStarted(ctx)
 	defer p.End()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
