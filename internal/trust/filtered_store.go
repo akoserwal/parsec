@@ -31,7 +31,7 @@ type FilteredStore struct {
 	validators []NamedValidator
 	// Filter for determining validator access
 	filter   ValidatorFilter
-	observer StoreObserver
+	observer FilteredStoreObserver
 }
 
 // FilteredStoreOption is a functional option for configuring a FilteredStore

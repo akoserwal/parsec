@@ -3,11 +3,10 @@ package trust
 import "context"
 
 // StoreObserver mirrors the Store component tree.
-// It embeds FilteredStoreObserver and adds the base Validate concern.
+// It embeds FilteredStoreObserver.
 // Implementations should embed NoOpStoreObserver for forward compatibility.
 type StoreObserver interface {
 	FilteredStoreObserver
-	ValidationStarted(ctx context.Context) (context.Context, ValidationProbe)
 }
 
 // ValidationProbe tracks a single Store.Validate invocation.
@@ -21,6 +20,7 @@ type ValidationProbe interface {
 // FilteredStoreObserver is called at key points during FilteredStore.ForActor.
 // Implementations should embed NoOpFilteredStoreObserver for forward compatibility.
 type FilteredStoreObserver interface {
+	ValidationStarted(ctx context.Context) (context.Context, ValidationProbe)
 	ForActorStarted(ctx context.Context) (context.Context, ForActorProbe)
 }
 
@@ -87,14 +87,14 @@ type NoOpStoreObserver struct {
 	NoOpFilteredStoreObserver
 }
 
-func (NoOpStoreObserver) ValidationStarted(ctx context.Context) (context.Context, ValidationProbe) {
-	return ctx, NoOpValidationProbe{}
-}
-
 type NoOpFilteredStoreObserver struct{}
 
 func (NoOpFilteredStoreObserver) ForActorStarted(ctx context.Context) (context.Context, ForActorProbe) {
 	return ctx, NoOpForActorProbe{}
+}
+
+func (NoOpFilteredStoreObserver) ValidationStarted(ctx context.Context) (context.Context, ValidationProbe) {
+	return ctx, NoOpValidationProbe{}
 }
 
 type NoOpJWTValidatorObserver struct{}
