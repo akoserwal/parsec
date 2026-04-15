@@ -11,18 +11,18 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-// stubCacheableDataSource is a test data source that implements Cacheable
-type stubCacheableDataSource struct {
+// mockCacheableDataSource is a test data source that implements Cacheable
+type mockCacheableDataSource struct {
 	name       string
 	fetchCount int // Track how many times Fetch is called
 	ttl        time.Duration
 }
 
-func (m *stubCacheableDataSource) Name() string {
+func (m *mockCacheableDataSource) Name() string {
 	return m.name
 }
 
-func (m *stubCacheableDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
+func (m *mockCacheableDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
 	m.fetchCount++
 	return &service.DataSourceResult{
 		Data:        []byte(fmt.Sprintf(`{"fetch_count":%d}`, m.fetchCount)),
@@ -30,7 +30,7 @@ func (m *stubCacheableDataSource) Fetch(ctx context.Context, input *service.Data
 	}, nil
 }
 
-func (m *stubCacheableDataSource) CacheKey(input *service.DataSourceInput) service.DataSourceInput {
+func (m *mockCacheableDataSource) CacheKey(input *service.DataSourceInput) service.DataSourceInput {
 	// Only cache by subject
 	masked := service.DataSourceInput{}
 	if input.Subject != nil {
@@ -41,21 +41,21 @@ func (m *stubCacheableDataSource) CacheKey(input *service.DataSourceInput) servi
 	return masked
 }
 
-func (m *stubCacheableDataSource) CacheTTL() time.Duration {
+func (m *mockCacheableDataSource) CacheTTL() time.Duration {
 	return m.ttl
 }
 
-// stubNonCacheableDataSource doesn't implement Cacheable
-type stubNonCacheableDataSource struct {
+// mockNonCacheableDataSource doesn't implement Cacheable
+type mockNonCacheableDataSource struct {
 	name       string
 	fetchCount int
 }
 
-func (m *stubNonCacheableDataSource) Name() string {
+func (m *mockNonCacheableDataSource) Name() string {
 	return m.name
 }
 
-func (m *stubNonCacheableDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
+func (m *mockNonCacheableDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
 	m.fetchCount++
 	return &service.DataSourceResult{
 		Data:        []byte(fmt.Sprintf(`{"fetch_count":%d}`, m.fetchCount)),
@@ -74,7 +74,7 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("caches results for cacheable source", func(t *testing.T) {
-		source := &stubCacheableDataSource{
+		source := &mockCacheableDataSource{
 			name: "test-source",
 			ttl:  1 * time.Hour,
 		}
@@ -116,7 +116,7 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 		// Use a fake clock to deterministically test cache expiration
 		clk := clock.NewFixtureClock(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC))
 
-		source := &stubCacheableDataSource{
+		source := &mockCacheableDataSource{
 			name: "test-source",
 			ttl:  50 * time.Millisecond,
 		}
@@ -152,7 +152,7 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 	})
 
 	t.Run("different cache keys result in different cache entries", func(t *testing.T) {
-		source := &stubCacheableDataSource{
+		source := &mockCacheableDataSource{
 			name: "test-source",
 			ttl:  1 * time.Hour,
 		}
@@ -190,7 +190,7 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 	})
 
 	t.Run("returns non-cacheable source as-is", func(t *testing.T) {
-		source := &stubNonCacheableDataSource{
+		source := &mockNonCacheableDataSource{
 			name: "non-cacheable",
 		}
 
@@ -206,7 +206,7 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 		// Use a fake clock to deterministically test cleanup
 		clk := clock.NewFixtureClock(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC))
 
-		source := &stubCacheableDataSource{
+		source := &mockCacheableDataSource{
 			name: "test-source",
 			ttl:  50 * time.Millisecond,
 		}
