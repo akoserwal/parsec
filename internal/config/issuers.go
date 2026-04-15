@@ -136,7 +136,7 @@ func buildKeyProviderRegistry(configs []KeyProviderConfig, keysObs keys.KeysObse
 }
 
 // buildSignerRegistry creates a SignerRegistry from configuration
-func buildSignerRegistry(configs []SignerConfig, trustDomain string, providerRegistry map[string]keys.KeyProvider, slotStore keys.KeySlotStore, rotObs keys.RotationObserver) (*keys.SignerRegistry, error) {
+func buildSignerRegistry(configs []SignerConfig, trustDomain string, providerRegistry map[string]keys.KeyProvider, slotStore keys.KeySlotStore, keysObs keys.KeysObserver) (*keys.SignerRegistry, error) {
 	registry := keys.NewSignerRegistry()
 
 	for _, cfg := range configs {
@@ -220,7 +220,7 @@ func buildSignerRegistry(configs []SignerConfig, trustDomain string, providerReg
 				GracePeriod:         gracePeriod,
 				CheckInterval:       checkInterval,
 				PrepareTimeout:      prepareTimeout,
-				Observer:            rotObs,
+				Observer:            keysObs,
 			})
 		default:
 			return nil, fmt.Errorf("unknown signer type for %s: %s (supported: dual_slot)", cfg.ID, cfg.Type)

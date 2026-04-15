@@ -21,7 +21,7 @@ type AWSKMSKeyProvider struct {
 	keyType     KeyType
 	algorithm   string
 	aliasPrefix string
-	observer    AWSKMSProviderObserver
+	observer    KeyProviderObserver
 }
 
 // AWSKMSConfig configures the AWS KMS key provider
@@ -31,7 +31,7 @@ type AWSKMSConfig struct {
 	Region      string
 	AliasPrefix string
 	Client      *kms.Client
-	Observer    AWSKMSProviderObserver
+	Observer    KeyProviderObserver
 }
 
 // NewAWSKMSKeyProvider creates a new AWS KMS key provider.
@@ -73,7 +73,7 @@ func NewAWSKMSKeyProvider(ctx context.Context, cfg AWSKMSConfig) (*AWSKMSKeyProv
 
 	obs := cfg.Observer
 	if obs == nil {
-		obs = NoOpAWSKMSProviderObserver{}
+		obs = NoOpKeyProviderObserver{}
 	}
 
 	return &AWSKMSKeyProvider{

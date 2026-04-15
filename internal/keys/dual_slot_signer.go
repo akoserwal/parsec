@@ -60,7 +60,7 @@ type DualSlotRotatingSigner struct {
 
 	clock    clock.Clock
 	ticker   clock.Ticker
-	observer RotationObserver
+	observer RotatingSignerObserver
 }
 
 // DualSlotRotatingSignerConfig configures the DualSlotRotatingSigner
@@ -80,7 +80,7 @@ type DualSlotRotatingSignerConfig struct {
 	PrepareTimeout    time.Duration // How long to wait before retrying a stuck "preparing" state (default: 1 minute)
 
 	// Observer must be non-nil; use NoOpObserver{} in tests.
-	Observer RotationObserver
+	Observer RotatingSignerObserver
 }
 
 // NewDualSlotRotatingSigner creates a new dual-slot rotating signer.
