@@ -96,7 +96,7 @@ func (m *AWSKMSKeyProvider) GetKeyHandle(ctx context.Context, trustDomain, names
 
 func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespace, keyName string) error {
 	aliasName := m.aliasName(trustDomain, namespace, keyName)
-	ctx, p := m.observer.KMSRotateStarted(ctx, aliasName)
+	ctx, p := m.observer.KMSRotateStarted(ctx, trustDomain, namespace, keyName)
 	defer p.End()
 
 	// 1. Create new KMS key (CMK) using configured keyType

@@ -183,7 +183,7 @@ func TestLoggingKeyRotationObserver_WarningMethods(t *testing.T) {
 func TestLoggingAWSKMSProviderObserver_CreateKeyFailed(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingAWSKMSProviderObserver(testLogger(&buf))
-	_, p := obs.KMSRotateStarted(context.Background(), "alias/parsec/test")
+	_, p := obs.KMSRotateStarted(context.Background(), "td", "ns", "key")
 
 	p.CreateKeyFailed(errors.New("access denied"))
 
@@ -194,7 +194,7 @@ func TestLoggingAWSKMSProviderObserver_CreateKeyFailed(t *testing.T) {
 func TestLoggingAWSKMSProviderObserver_OldKeyDeletionFailed(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingAWSKMSProviderObserver(testLogger(&buf))
-	_, p := obs.KMSRotateStarted(context.Background(), "alias/parsec/test")
+	_, p := obs.KMSRotateStarted(context.Background(), "td", "ns", "key")
 
 	p.OldKeyDeletionFailed("key-123", errors.New("access denied"))
 

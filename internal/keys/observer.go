@@ -36,7 +36,7 @@ type KeyCacheUpdateProbe interface {
 // AWSKMSProviderObserver is called during AWS KMS key rotation.
 // Implementations should embed NoOpAWSKMSProviderObserver for forward compatibility.
 type AWSKMSProviderObserver interface {
-	KMSRotateStarted(ctx context.Context, alias string) (context.Context, KMSRotateProbe)
+	KMSRotateStarted(ctx context.Context, trustDomain, namespace, keyName string) (context.Context, KMSRotateProbe)
 }
 
 // KMSRotateProbe tracks a single AWS KMS key rotation.
@@ -137,7 +137,7 @@ func (NoOpKMSRotateProbe) End()                               {}
 
 type NoOpAWSKMSProviderObserver struct{}
 
-func (NoOpAWSKMSProviderObserver) KMSRotateStarted(ctx context.Context, _ string) (context.Context, KMSRotateProbe) {
+func (NoOpAWSKMSProviderObserver) KMSRotateStarted(ctx context.Context, _, _, _ string) (context.Context, KMSRotateProbe) {
 	return ctx, NoOpKMSRotateProbe{}
 }
 

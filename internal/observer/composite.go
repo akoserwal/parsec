@@ -101,10 +101,10 @@ func (c *compositeAll) KeyCacheUpdateStarted(ctx context.Context) (context.Conte
 	return ctx, &compositeKeyCacheUpdateProbe{probes}
 }
 
-func (c *compositeAll) KMSRotateStarted(ctx context.Context, alias string) (context.Context, keys.KMSRotateProbe) {
+func (c *compositeAll) KMSRotateStarted(ctx context.Context, trustDomain, namespace, keyName string) (context.Context, keys.KMSRotateProbe) {
 	probes := make([]keys.KMSRotateProbe, len(c.children))
 	for i, ch := range c.children {
-		ctx, probes[i] = ch.KMSRotateStarted(ctx, alias)
+		ctx, probes[i] = ch.KMSRotateStarted(ctx, trustDomain, namespace, keyName)
 	}
 	return ctx, &compositeKMSRotateProbe{probes}
 }

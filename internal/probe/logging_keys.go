@@ -111,8 +111,12 @@ func NewLoggingAWSKMSProviderObserver(logger zerolog.Logger) *LoggingAWSKMSProvi
 	return &LoggingAWSKMSProviderObserver{logger: logger}
 }
 
-func (o *LoggingAWSKMSProviderObserver) KMSRotateStarted(ctx context.Context, alias string) (context.Context, keys.KMSRotateProbe) {
-	o.logger.Info().Str("alias", alias).Msg("KMS key rotation started")
+func (o *LoggingAWSKMSProviderObserver) KMSRotateStarted(ctx context.Context, trustDomain, namespace, keyName string) (context.Context, keys.KMSRotateProbe) {
+	o.logger.Info().
+		Str("trust_domain", trustDomain).
+		Str("namespace", namespace).
+		Str("key_name", keyName).
+		Msg("KMS key rotation started")
 	return ctx, &loggingKMSRotateProbe{
 		logger:    o.logger,
 		startTime: time.Now(),
