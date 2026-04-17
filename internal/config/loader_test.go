@@ -1,9 +1,6 @@
 package config
 
-import (
-	"os"
-	"testing"
-)
+import "testing"
 
 func TestNewLoader_WithoutConfigFile(t *testing.T) {
 	// Test that loader works with empty config path (no file)
@@ -37,13 +34,8 @@ func TestNewLoader_WithoutConfigFile(t *testing.T) {
 }
 
 func TestNewLoader_WithEnvironmentVariables(t *testing.T) {
-	// Set some environment variables
-	_ = os.Setenv("PARSEC_SERVER__GRPC_PORT", "19090")
-	_ = os.Setenv("PARSEC_TRUST_DOMAIN", "env.test.com")
-	defer func() {
-		_ = os.Unsetenv("PARSEC_SERVER__GRPC_PORT")
-		_ = os.Unsetenv("PARSEC_TRUST_DOMAIN")
-	}()
+	t.Setenv("PARSEC_SERVER__GRPC_PORT", "19090")
+	t.Setenv("PARSEC_TRUST_DOMAIN", "env.test.com")
 
 	// Create loader without config file
 	loader, err := NewLoader("")

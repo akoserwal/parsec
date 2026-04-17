@@ -104,24 +104,24 @@ func (p *{op}Probe) End() {
 
 ```go
 func (s *Service) DoOperation(ctx context.Context, ...) error {
-    ctx, probe := s.observer.DoOperationStarted(ctx, ...)
-    defer probe.End()
+    ctx, p := s.observer.DoOperationStarted(ctx, ...)
+    defer p.End()
     
     // ... operation logic ...
     
     if err != nil {
-        probe.Error(err)
+        p.Error(err)
         return err
     }
     
-    probe.Result(...)
+    p.Result(...)
     return nil
 }
 ```
 
 ## Key Principles
 
-- Always use `defer probe.End()` for timing accuracy
+- Always use `defer p.End()` for timing accuracy
 - Probes either emit signals throughout method calls, or may collect state via methods and only emit upon `End()`. It depends on signal best practices and what minimizes overhead. Logs usually emit at the end, unless the probe runs long.
 - Domain interfaces live in `domain/` or `application/`; implementations in `observability/`
 - Include `request_id` from context in logs

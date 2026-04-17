@@ -18,6 +18,7 @@ type InMemoryCachingDataSource struct {
 	source    service.DataSource
 	cacheable service.Cacheable
 	clock     clock.Clock
+	observer  CacheObserver
 	mu        sync.RWMutex
 	entries   map[string]*cacheEntry
 }
@@ -38,23 +39,27 @@ func WithClock(clk clock.Clock) InMemoryCachingDataSourceOption {
 	}
 }
 
-// NewInMemoryCachingDataSource wraps a data source with in-memory caching if it implements Cacheable
-// Returns the original source if it doesn't implement Cacheable
-func NewInMemoryCachingDataSource(source service.DataSource, opts ...InMemoryCachingDataSourceOption) service.DataSource {
+// NewInMemoryCachingDataSource wraps a data source with in-memory caching if it implements Cacheable.
+// obs is required when the source is cacheable; it is used on every Fetch.
+// Returns the original source if it doesn't implement Cacheable (obs is unused in that case).
+func NewInMemoryCachingDataSource(source service.DataSource, obs CacheObserver, opts ...InMemoryCachingDataSourceOption) service.DataSource {
 	cacheable, ok := source.(service.Cacheable)
 	if !ok {
-		// Source is not cacheable, return as-is
 		return source
+	}
+
+	if obs == nil {
+		obs = NoOpObserver{}
 	}
 
 	ds := &InMemoryCachingDataSource{
 		source:    source,
 		cacheable: cacheable,
-		clock:     clock.NewSystemClock(), // Default to system clock
+		clock:     clock.NewSystemClock(),
+		observer:  obs,
 		entries:   make(map[string]*cacheEntry),
 	}
 
-	// Apply options
 	for _, opt := range opts {
 		opt(ds)
 	}
@@ -69,6 +74,9 @@ func (c *InMemoryCachingDataSource) Name() string {
 
 // Fetch checks the cache first, then fetches from source on miss
 func (c *InMemoryCachingDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
+	ctx, p := c.observer.CacheFetchStarted(ctx, c.source.Name())
+	defer p.End()
+
 	// Get the cache key (which is the masked input with only relevant fields)
 	maskedInput := c.cacheable.CacheKey(input)
 
@@ -87,17 +95,21 @@ func (c *InMemoryCachingDataSource) Fetch(ctx context.Context, input *service.Da
 	if found {
 		// Check if entry has expired
 		if entry.expiresAt.IsZero() || c.clock.Now().Before(entry.expiresAt) {
+			p.CacheHit()
 			return entry.result, nil
 		}
-		// Entry expired, remove it
+		p.CacheExpired()
 		c.mu.Lock()
 		delete(c.entries, cacheKeyStr)
 		c.mu.Unlock()
 	}
 
+	p.CacheMiss()
+
 	// Cache miss - fetch from source using the original (full) input
 	result, err := c.source.Fetch(ctx, input)
 	if err != nil {
+		p.FetchFailed(err)
 		return nil, err
 	}
 

@@ -1,6 +1,7 @@
 package trust
 
 import (
+	"context"
 	"testing"
 
 	"github.com/project-kessel/parsec/internal/claims"
@@ -139,7 +140,7 @@ func TestCelValidatorFilter_IsAllowed(t *testing.T) {
 				t.Fatalf("failed to create filter: %v", err)
 			}
 
-			allowed, err := filter.IsAllowed(tt.actor, tt.validatorName, nil)
+			allowed, err := filter.IsAllowed(context.Background(), tt.actor, tt.validatorName, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("IsAllowed() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -427,7 +428,7 @@ func TestCelValidatorFilter_WithRequestAttributes(t *testing.T) {
 				t.Fatalf("failed to create filter: %v", err)
 			}
 
-			allowed, err := filter.IsAllowed(tt.actor, tt.validatorName, tt.requestAttrs)
+			allowed, err := filter.IsAllowed(context.Background(), tt.actor, tt.validatorName, tt.requestAttrs)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("IsAllowed() error = %v, wantErr %v", err, tt.wantErr)
 				return

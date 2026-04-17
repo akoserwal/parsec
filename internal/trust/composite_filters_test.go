@@ -1,6 +1,7 @@
 package trust
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -14,7 +15,7 @@ type mockFilter struct {
 	err     error
 }
 
-func (f *mockFilter) IsAllowed(actor *Result, validatorName string, requestAttrs *request.RequestAttributes) (bool, error) {
+func (f *mockFilter) IsAllowed(_ context.Context, _ *Result, _ string, _ *request.RequestAttributes) (bool, error) {
 	return f.allowed, f.err
 }
 
@@ -132,7 +133,7 @@ func TestAnyValidatorFilter_IsAllowed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			filter := NewAnyValidatorFilter(tt.filters...)
-			allowed, err := filter.IsAllowed(testActor, tt.validatorName, nil)
+			allowed, err := filter.IsAllowed(context.Background(), testActor, tt.validatorName, nil)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("IsAllowed() error = %v, wantErr %v", err, tt.wantErr)
@@ -153,7 +154,7 @@ func TestAnyValidatorFilter_NoFilters(t *testing.T) {
 		TrustDomain: "test",
 	}
 
-	allowed, err := filter.IsAllowed(actor, "test-validator", nil)
+	allowed, err := filter.IsAllowed(context.Background(), actor, "test-validator", nil)
 	if err == nil {
 		t.Errorf("expected error for no filters configured, got nil")
 	}
@@ -214,7 +215,7 @@ func TestAnyValidatorFilter_WithRealCELFilters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			allowed, err := anyFilter.IsAllowed(tt.actor, "test-validator", nil)
+			allowed, err := anyFilter.IsAllowed(context.Background(), tt.actor, "test-validator", nil)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 				return

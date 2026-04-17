@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/kms/types"
 )
@@ -21,6 +21,7 @@ type AWSKMSKeyProvider struct {
 	keyType     KeyType
 	algorithm   string
 	aliasPrefix string
+	observer    KeyProviderObserver
 }
 
 // AWSKMSConfig configures the AWS KMS key provider
@@ -30,9 +31,10 @@ type AWSKMSConfig struct {
 	Region      string
 	AliasPrefix string
 	Client      *kms.Client
+	Observer    KeyProviderObserver
 }
 
-// NewAWSKMSKeyProvider creates a new AWS KMS key provider
+// NewAWSKMSKeyProvider creates a new AWS KMS key provider.
 func NewAWSKMSKeyProvider(ctx context.Context, cfg AWSKMSConfig) (*AWSKMSKeyProvider, error) {
 	if cfg.KeyType == "" {
 		return nil, fmt.Errorf("key_type is required")
@@ -54,7 +56,7 @@ func NewAWSKMSKeyProvider(ctx context.Context, cfg AWSKMSConfig) (*AWSKMSKeyProv
 		client = cfg.Client
 	} else {
 		// Load AWS config
-		awsCfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(cfg.Region))
+		awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
 		if err != nil {
 			return nil, fmt.Errorf("failed to load AWS config: %w", err)
 		}
@@ -69,11 +71,17 @@ func NewAWSKMSKeyProvider(ctx context.Context, cfg AWSKMSConfig) (*AWSKMSKeyProv
 		return nil, fmt.Errorf("alias prefix must start with 'alias/', got: %s", cfg.AliasPrefix)
 	}
 
+	obs := cfg.Observer
+	if obs == nil {
+		obs = NoOpKeyProviderObserver{}
+	}
+
 	return &AWSKMSKeyProvider{
 		client:      client,
 		keyType:     cfg.KeyType,
 		algorithm:   algorithm,
 		aliasPrefix: cfg.AliasPrefix,
+		observer:    obs,
 	}, nil
 }
 
@@ -87,6 +95,10 @@ func (m *AWSKMSKeyProvider) GetKeyHandle(ctx context.Context, trustDomain, names
 }
 
 func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespace, keyName string) error {
+	aliasName := m.aliasName(trustDomain, namespace, keyName)
+	ctx, p := m.observer.KMSRotateStarted(ctx, trustDomain, namespace, keyName)
+	defer p.End()
+
 	// 1. Create new KMS key (CMK) using configured keyType
 	keySpec, err := keySpecFromKeyType(m.keyType)
 	if err != nil {
@@ -98,17 +110,18 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 		KeyUsage: types.KeyUsageTypeSignVerify,
 	})
 	if err != nil {
+		p.CreateKeyFailed(err)
 		return fmt.Errorf("failed to create KMS key: %w", err)
 	}
 
 	newKeyID := aws.ToString(createResp.KeyMetadata.KeyId)
-	aliasName := m.aliasName(trustDomain, namespace, keyName)
 
 	// 2. Get current alias to find old key (if exists)
 	oldKeyID, err := m.getKeyIDFromAlias(ctx, aliasName)
 	if err != nil && oldKeyID == "" {
-		// Alias doesn't exist, that's fine
+		// Alias doesn't exist yet
 	} else if err != nil {
+		p.AliasCheckFailed(err)
 		return fmt.Errorf("failed to check existing alias: %w", err)
 	}
 
@@ -119,6 +132,7 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 			TargetKeyId: aws.String(newKeyID),
 		})
 		if err != nil {
+			p.AliasUpdateFailed(err)
 			return fmt.Errorf("failed to update alias: %w", err)
 		}
 	} else {
@@ -127,6 +141,7 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 			TargetKeyId: aws.String(newKeyID),
 		})
 		if err != nil {
+			p.AliasUpdateFailed(err)
 			return fmt.Errorf("failed to create alias: %w", err)
 		}
 	}
@@ -138,7 +153,7 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 			PendingWindowInDays: aws.Int32(7),
 		})
 		if err != nil {
-			fmt.Printf("Warning: failed to schedule old key %s for deletion: %v\n", oldKeyID, err)
+			p.OldKeyDeletionFailed(oldKeyID, err)
 		}
 	}
 
@@ -150,7 +165,7 @@ func (m *AWSKMSKeyProvider) getKeyIDFromAlias(ctx context.Context, aliasName str
 		KeyId: aws.String(aliasName),
 	})
 	if err != nil {
-		return "", nil // Assume not found if error
+		return "", err
 	}
 	return aws.ToString(resp.KeyMetadata.KeyId), nil
 }

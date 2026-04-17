@@ -27,7 +27,7 @@ type ExchangeServer struct {
 func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenService, claimsFilterRegistry ClaimsFilterRegistry, observer service.TokenExchangeObserver) *ExchangeServer {
 	// Use null object pattern - default to no-op observer if none provided
 	if observer == nil {
-		observer = service.NoOpTokenExchangeObserver()
+		observer = service.NoOpTokenExchangeObserver{}
 	}
 	return &ExchangeServer{
 		trustStore:           trustStore,
@@ -40,8 +40,8 @@ func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenServic
 // Exchange implements the token exchange endpoint (RFC 8693)
 func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeRequest) (*parsecv1.ExchangeResponse, error) {
 	// Create request-scoped probe
-	ctx, probe := s.observer.TokenExchangeStarted(ctx, req.GrantType, req.RequestedTokenType, req.Audience, req.Scope)
-	defer probe.End()
+	ctx, p := s.observer.TokenExchangeStarted(ctx, req.GrantType, req.RequestedTokenType, req.Audience, req.Scope)
+	defer p.End()
 
 	// 1. Validate the grant type
 	if req.GrantType != "urn:ietf:params:oauth:grant-type:token-exchange" {
@@ -59,13 +59,13 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		var validationErr error
 		actor, validationErr = s.trustStore.Validate(ctx, actorCred)
 		if validationErr != nil {
-			probe.ActorValidationFailed(validationErr)
+			p.ActorValidationFailed(validationErr)
 			return nil, fmt.Errorf("actor validation failed: %w", validationErr)
 		}
-		probe.ActorValidationSucceeded(actor)
+		p.ActorValidationSucceeded(actor)
 	} else {
 		actor = trust.AnonymousResult()
-		probe.ActorValidationSucceeded(actor)
+		p.ActorValidationSucceeded(actor)
 	}
 
 	// 3. Parse and filter client-provided request_context claims
@@ -74,21 +74,21 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		// Decode base64-encoded request_context (per transaction token spec)
 		decodedJSON, err := base64.StdEncoding.DecodeString(req.RequestContext)
 		if err != nil {
-			probe.RequestContextParseFailed(err)
+			p.RequestContextParseFailed(err)
 			return nil, fmt.Errorf("failed to decode request_context base64: %w", err)
 		}
 
 		// Parse request_context JSON
 		var requestContextClaims claims.Claims
 		if err := json.Unmarshal(decodedJSON, &requestContextClaims); err != nil {
-			probe.RequestContextParseFailed(err)
+			p.RequestContextParseFailed(err)
 			return nil, fmt.Errorf("failed to parse request_context JSON: %w", err)
 		}
 
 		// Get the claims filter for this actor
 		claimsFilter, err := s.claimsFilterRegistry.GetFilter(actor)
 		if err != nil {
-			probe.RequestContextParseFailed(err)
+			p.RequestContextParseFailed(err)
 			return nil, fmt.Errorf("failed to get claims filter for actor: %w", err)
 		}
 
@@ -97,11 +97,11 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 
 		// Convert filtered claims to RequestAttributes
 		reqAttrs = request.FromClaims(filteredClaims)
-		probe.RequestContextParsed(reqAttrs)
+		p.RequestContextParsed(reqAttrs)
 	} else {
 		// No request_context provided, use empty attributes
 		reqAttrs = request.FromClaims(nil)
-		probe.RequestContextParsed(reqAttrs)
+		p.RequestContextParsed(reqAttrs)
 	}
 
 	// Add metadata from the token exchange request itself to Additional
@@ -132,10 +132,10 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	// The filtered store only includes validators the actor is allowed to use
 	result, err := filteredStore.Validate(ctx, cred)
 	if err != nil {
-		probe.SubjectTokenValidationFailed(err)
+		p.SubjectTokenValidationFailed(err)
 		return nil, fmt.Errorf("token validation failed: %w", err)
 	}
-	probe.SubjectTokenValidationSucceeded(result)
+	p.SubjectTokenValidationSucceeded(result)
 
 	// 6. Determine which token type to issue
 	// RFC 8693: If requested_token_type is not specified, default to access_token

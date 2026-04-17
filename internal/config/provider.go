@@ -4,16 +4,22 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/rs/zerolog"
+
 	"github.com/project-kessel/parsec/internal/httpfixture"
+	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-// Provider constructs all application components from configuration
-// This is the main entry point for building a configured parsec instance
+// Provider constructs all application components from configuration.
+// Create one with NewProvider.
 type Provider struct {
 	config *Config
+
+	logCtx *LoggerContext
+	obs    observer.Observer
 
 	// Lazily constructed components (cached after first call)
 	trustStore           trust.Store
@@ -23,48 +29,69 @@ type Provider struct {
 	tokenService         *service.TokenService
 	httpFixtureProvider  httpfixture.FixtureProvider
 	httpFixtureBuilt     bool
-	observer             service.ApplicationObserver
 }
 
-// NewProvider creates a new provider from configuration
+// NewProvider creates a new provider from configuration.
 func NewProvider(config *Config) *Provider {
-	return &Provider{
-		config: config,
-	}
+	return &Provider{config: config}
 }
 
-// SetObserver sets the application observer for all components built by this provider.
-// Must be called before TokenService() or any method that depends on the observer.
-func (p *Provider) SetObserver(observer service.ApplicationObserver) {
-	p.observer = observer
-}
-
-// Observer returns the configured application observer.
-// If SetObserver was called, returns that observer.
-// Otherwise, creates a default observer from config.
-func (p *Provider) Observer() (service.ApplicationObserver, error) {
-	if p.observer != nil {
-		return p.observer, nil
+func (p *Provider) loggerContext() (*LoggerContext, error) {
+	if p.logCtx != nil {
+		return p.logCtx, nil
 	}
 
-	// Build from config (fallback when SetObserver was not called)
-	observer, err := NewObserver(p.config.Observability)
+	lc, err := NewLoggerContext(p.config.Observability)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create logger context: %w", err)
+	}
+
+	p.logCtx = &lc
+	return p.logCtx, nil
+}
+
+// Logger returns the application logger built from configuration.
+func (p *Provider) Logger() (zerolog.Logger, error) {
+	lc, err := p.loggerContext()
+	if err != nil {
+		return zerolog.Nop(), err
+	}
+	return lc.Logger, nil
+}
+
+// Observer returns the central observer, lazily created from configuration.
+func (p *Provider) Observer() (observer.Observer, error) {
+	if p.obs != nil {
+		return p.obs, nil
+	}
+
+	lc, err := p.loggerContext()
+	if err != nil {
+		return nil, err
+	}
+
+	obs, err := NewObserverWithLogger(p.config.Observability, *lc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create observer: %w", err)
 	}
 
-	p.observer = observer
-	return observer, nil
+	p.obs = obs
+	return obs, nil
 }
 
-// TrustStore returns the configured trust store
+// TrustStore returns the configured trust store.
 func (p *Provider) TrustStore() (trust.Store, error) {
 	if p.trustStore != nil {
 		return p.trustStore, nil
 	}
 
+	obs, err := p.Observer()
+	if err != nil {
+		return nil, err
+	}
+
 	transport := p.HTTPTransport()
-	store, err := NewTrustStore(p.config.TrustStore, transport)
+	store, err := NewTrustStore(p.config.TrustStore, transport, obs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create trust store: %w", err)
 	}
@@ -79,8 +106,13 @@ func (p *Provider) DataSourceRegistry() (*service.DataSourceRegistry, error) {
 		return p.dataSourceRegistry, nil
 	}
 
+	obs, err := p.Observer()
+	if err != nil {
+		return nil, err
+	}
+
 	transport := p.HTTPTransport()
-	registry, err := NewDataSourceRegistry(p.config.DataSources, transport)
+	registry, err := NewDataSourceRegistry(p.config.DataSources, transport, obs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create data source registry: %w", err)
 	}
@@ -95,7 +127,12 @@ func (p *Provider) IssuerRegistry() (service.Registry, error) {
 		return p.issuerRegistry, nil
 	}
 
-	registry, err := NewIssuerRegistry(*p.config)
+	obs, err := p.Observer()
+	if err != nil {
+		return nil, err
+	}
+
+	registry, err := NewIssuerRegistry(*p.config, obs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create issuer registry: %w", err)
 	}
@@ -142,18 +179,16 @@ func (p *Provider) TokenService() (*service.TokenService, error) {
 		return nil, err
 	}
 
-	// Get observer
-	observer, err := p.Observer()
+	obs, err := p.Observer()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get observer: %w", err)
+		return nil, err
 	}
 
-	// Create token service
 	tokenService := service.NewTokenService(
 		p.config.TrustDomain,
 		dataSourceRegistry,
 		issuerRegistry,
-		observer, // Application observer for observability
+		obs,
 	)
 
 	p.tokenService = tokenService

@@ -1,0 +1,64 @@
+package probe
+
+import (
+	"context"
+	"time"
+
+	"github.com/rs/zerolog"
+
+	"github.com/project-kessel/parsec/internal/datasource"
+)
+
+var _ datasource.LuaObserver = (*LoggingLuaDataSourceObserver)(nil)
+
+type LoggingLuaDataSourceObserver struct {
+	datasource.NoOpLuaObserver
+	logger zerolog.Logger
+}
+
+func NewLoggingLuaDataSourceObserver(logger zerolog.Logger) *LoggingLuaDataSourceObserver {
+	return &LoggingLuaDataSourceObserver{logger: logger}
+}
+
+func (o *LoggingLuaDataSourceObserver) LuaFetchStarted(ctx context.Context, dataSourceName string) (context.Context, datasource.LuaFetchProbe) {
+	return ctx, &loggingLuaFetchProbe{
+		logger:    o.logger.With().Str("datasource", dataSourceName).Logger(),
+		startTime: time.Now(),
+	}
+}
+
+type loggingLuaFetchProbe struct {
+	datasource.NoOpLuaFetchProbe
+	logger    zerolog.Logger
+	startTime time.Time
+}
+
+func (p *loggingLuaFetchProbe) ScriptLoadFailed(err error) {
+	p.logger.Error().Err(err).Msg("lua script load failed")
+}
+
+func (p *loggingLuaFetchProbe) ScriptExecutionFailed(err error) {
+	p.logger.Error().Err(err).Msg("lua script execution failed")
+}
+
+func (p *loggingLuaFetchProbe) InvalidReturnType(got string) {
+	p.logger.Error().Str("got", got).Msg("lua fetch returned invalid type (expected table or nil)")
+}
+
+func (p *loggingLuaFetchProbe) FetchCompleted() {
+	p.logger.Debug().Msg("lua fetch completed")
+}
+
+func (p *loggingLuaFetchProbe) FetchCompletedNil() {
+	p.logger.Debug().Msg("lua fetch completed with nil result")
+}
+
+func (p *loggingLuaFetchProbe) ResultConversionFailed(err error) {
+	p.logger.Error().Err(err).Msg("lua result table conversion failed")
+}
+
+func (p *loggingLuaFetchProbe) End() {
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("lua fetch ended")
+}

@@ -382,6 +382,7 @@ func TestAuthzServer_WithActorFiltering(t *testing.T) {
 	// Setup filtered trust store with CEL-based filtering
 	filteredStore, err := trust.NewFilteredStore(
 		trust.WithCELFilter(`actor.trust_domain == "gateway.example.com" && validator_name in ["external-validator"]`),
+		trust.WithObserver(trust.NoOpObserver{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create filtered store: %v", err)
@@ -479,6 +480,7 @@ func TestAuthzServer_WithActorFiltering(t *testing.T) {
 		// Create a new store with the gateway validator
 		storeWithGateway, err := trust.NewFilteredStore(
 			trust.WithCELFilter(`actor.trust_domain == "gateway.example.com" && validator_name in ["external-validator"]`),
+			trust.WithObserver(trust.NoOpObserver{}),
 		)
 		if err != nil {
 			t.Fatalf("failed to create store: %v", err)
@@ -601,6 +603,7 @@ func TestAuthzServer_WithActorFilteringByRequestPath(t *testing.T) {
 			(validator_name == "admin-validator" && request.path.startsWith("/admin")) ||
 			(validator_name == "user-validator" && request.path.startsWith("/api"))
 		`),
+		trust.WithObserver(trust.NoOpObserver{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create filtered store: %v", err)

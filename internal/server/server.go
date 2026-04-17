@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -42,6 +43,7 @@ type Server struct {
 	grpcListener    net.Listener
 	httpListener    net.Listener
 	grpcDialOptions []grpc.DialOption
+	observer        LifecycleObserver
 
 	authzServer    *AuthzServer
 	exchangeServer *ExchangeServer
@@ -62,14 +64,22 @@ type Config struct {
 	AuthzServer    *AuthzServer
 	ExchangeServer *ExchangeServer
 	JWKSServer     *JWKSServer
+
+	// Observer for server lifecycle events. Defaults to NoOpObserver{} if nil.
+	Observer LifecycleObserver
 }
 
-// New creates a new server with the given configuration
+// New creates a new server with the given configuration.
 func New(cfg Config) *Server {
+	obs := cfg.Observer
+	if obs == nil {
+		obs = NoOpObserver{}
+	}
 	return &Server{
 		grpcListener:    cfg.GRPCListener,
 		httpListener:    cfg.HTTPListener,
 		grpcDialOptions: cfg.GRPCDialOptions,
+		observer:        obs,
 		authzServer:     cfg.AuthzServer,
 		exchangeServer:  cfg.ExchangeServer,
 		jwksServer:      cfg.JWKSServer,
@@ -142,13 +152,13 @@ func (s *Server) Start(ctx context.Context) error {
 	// All fallible setup is complete. Launch the serve goroutines last so
 	// that an early-return error never orphans a running goroutine.
 	go func() {
-		if err := s.grpcServer.Serve(s.grpcListener); err != nil {
-			fmt.Printf("gRPC server error: %v\n", err)
+		if err := s.grpcServer.Serve(s.grpcListener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			s.observer.GRPCServeFailed(err)
 		}
 	}()
 	go func() {
 		if err := s.httpServer.Serve(s.httpListener); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("HTTP server error: %v\n", err)
+			s.observer.HTTPServeFailed(err)
 		}
 	}()
 
@@ -176,6 +186,9 @@ func (s *Server) SetNotReady() {
 
 // Stop gracefully stops both servers
 func (s *Server) Stop(ctx context.Context) error {
+	ctx, p := s.observer.StopStarted(ctx)
+	defer p.End()
+
 	// Signal health watchers that all services are going away.
 	// Shutdown sets every registered service to NOT_SERVING and
 	// ignores any future SetServingStatus calls.

@@ -9,7 +9,7 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-// FakeObserver is a test double that implements ApplicationObserver.
+// FakeObserver is a test double that implements ServiceObserver.
 // It records all probe creations for later assertion in tests.
 type FakeObserver struct {
 	t *testing.T

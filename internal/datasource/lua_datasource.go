@@ -20,6 +20,7 @@ type LuaDataSource struct {
 	script       string
 	configSource luaservices.ConfigSource
 	httpConfig   luaservices.HTTPServiceConfig
+	observer     LuaObserver
 }
 
 // LuaDataSourceConfig configures a Lua data source
@@ -48,6 +49,9 @@ type LuaDataSourceConfig struct {
 	// HTTPConfig provides HTTP service configuration including timeout, fixtures, etc.
 	// If nil, default HTTP config (30s timeout, no fixtures) will be used
 	HTTPConfig *luaservices.HTTPServiceConfig
+
+	// Observer for Lua-specific execution events. Must be non-nil.
+	Observer LuaObserver
 }
 
 // NewLuaDataSource creates a new Lua data source
@@ -87,11 +91,17 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 		}
 	}
 
+	obs := config.Observer
+	if obs == nil {
+		obs = NoOpObserver{}
+	}
+
 	return &LuaDataSource{
 		name:         config.Name,
 		script:       config.Script,
 		configSource: config.ConfigSource,
 		httpConfig:   httpConfig,
+		observer:     obs,
 	}, nil
 }
 
@@ -102,11 +112,14 @@ func (ds *LuaDataSource) Name() string {
 
 // Fetch executes the Lua script to fetch data
 func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
-	// Create a new Lua state for this request
+	// TODO(RHCLOUD-45xxx): propagate enriched context through Lua HTTP calls
+	// so request IDs and tracing spans are not lost within data sources.
+	_, p := ds.observer.LuaFetchStarted(ctx, ds.name)
+	defer p.End()
+
 	L := lua.NewState()
 	defer L.Close()
 
-	// Register services
 	httpService := luaservices.NewHTTPServiceWithConfig(ds.httpConfig)
 	httpService.Register(L)
 
@@ -116,40 +129,43 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 	jsonService := luaservices.NewJSONService()
 	jsonService.Register(L)
 
-	// Load the script
 	if err := L.DoString(ds.script); err != nil {
+		p.ScriptLoadFailed(err)
 		return nil, fmt.Errorf("failed to load script: %w", err)
 	}
 
-	// Convert input to Lua table
 	inputTable := ds.inputToLuaTable(L, input)
 
-	// Call the fetch function
 	fetchFunc := L.GetGlobal("fetch")
 	if err := L.CallByParam(lua.P{
 		Fn:      fetchFunc,
 		NRet:    1,
 		Protect: true,
 	}, inputTable); err != nil {
+		p.ScriptExecutionFailed(err)
 		return nil, fmt.Errorf("script execution failed: %w", err)
 	}
 
-	// Get the result
 	ret := L.Get(-1)
 	L.Pop(1)
 
-	// Handle nil result (data source has nothing to contribute)
 	if ret.Type() == lua.LTNil {
+		p.FetchCompletedNil()
 		return nil, nil
 	}
 
-	// Convert result to DataSourceResult
 	if ret.Type() != lua.LTTable {
+		p.InvalidReturnType(ret.Type().String())
 		return nil, fmt.Errorf("fetch function must return a table or nil, got %s", ret.Type())
 	}
 
-	resultTable := ret.(*lua.LTable)
-	return ds.luaTableToResult(resultTable)
+	result, err := ds.luaTableToResult(ret.(*lua.LTable))
+	if err != nil {
+		p.ResultConversionFailed(err)
+		return nil, err
+	}
+	p.FetchCompleted()
+	return result, nil
 }
 
 // inputToLuaTable converts a DataSourceInput to a Lua table
@@ -352,6 +368,10 @@ type CacheableLuaDataSourceConfig struct {
 	// If nil, default HTTP config (30s timeout, no fixtures) will be used
 	HTTPConfig *luaservices.HTTPServiceConfig
 
+	// Observer for Lua-specific execution events on the inner Lua data source.
+	// If nil, NewLuaDataSource substitutes NoOpObserver{}.
+	Observer LuaObserver
+
 	// CacheKeyFunc is the name of the Lua function that generates cache keys
 	// REQUIRED - the function should take an input table and return a modified input table
 	// with only the fields relevant for caching
@@ -383,6 +403,7 @@ func NewCacheableLuaDataSource(config CacheableLuaDataSourceConfig) (*CacheableL
 		Script:       config.Script,
 		ConfigSource: config.ConfigSource,
 		HTTPConfig:   config.HTTPConfig,
+		Observer:     config.Observer,
 	})
 	if err != nil {
 		return nil, err

@@ -143,6 +143,15 @@ type DataSourceConfig struct {
 	// HTTP configuration
 	HTTPConfig *HTTPConfig `koanf:"http"`
 
+	// CacheKeyFunc names the Lua global that implements cache key masking. When non-empty,
+	// the data source is built as datasource.CacheableLuaDataSource (script must define
+	// fetch and this function). Observer wiring matches a plain Lua data source.
+	CacheKeyFunc string `koanf:"cache_key_func"`
+
+	// LuaCacheTTL is a duration string (e.g. "5m") for CacheableLuaDataSource.CacheTTL.
+	// Empty uses the datasource package default when creating a cacheable Lua source.
+	LuaCacheTTL string `koanf:"lua_cache_ttl"`
+
 	// Caching configuration
 	Caching *CachingConfig `koanf:"caching"`
 }
@@ -345,9 +354,16 @@ type ObservabilityConfig struct {
 	LogFormat string `koanf:"log_format" usage:"log format: json, text"`
 
 	// Event-specific logging configuration
-	TokenIssuance *EventLoggingConfig `koanf:"token_issuance"`
-	TokenExchange *EventLoggingConfig `koanf:"token_exchange"`
-	AuthzCheck    *EventLoggingConfig `koanf:"authz_check"`
+	TokenIssuance   *EventLoggingConfig `koanf:"token_issuance"`
+	TokenExchange   *EventLoggingConfig `koanf:"token_exchange"`
+	AuthzCheck      *EventLoggingConfig `koanf:"authz_check"`
+	DataSourceCache *EventLoggingConfig `koanf:"datasource_cache"`
+	LuaDataSource   *EventLoggingConfig `koanf:"lua_datasource"`
+	KeyRotation     *EventLoggingConfig `koanf:"key_rotation"`
+	KeyProvider     *EventLoggingConfig `koanf:"key_provider"`
+	TrustValidation *EventLoggingConfig `koanf:"trust_validation"`
+	JWKSCache       *EventLoggingConfig `koanf:"jwks_cache"`
+	ServerLifecycle *EventLoggingConfig `koanf:"server_lifecycle"`
 
 	// Composite observer fields - allows multiple observers
 	Observers []ObservabilityConfig `koanf:"observers"`

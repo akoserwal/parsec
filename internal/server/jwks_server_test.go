@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 	"testing"
 	"time"
@@ -15,34 +14,49 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
+// startJWKSTestServer creates a full test server with the given issuer
+// registry, wiring up a stub trust store, data source registry, and token
+// service so tests only need to set up issuers.
+func startJWKSTestServer(t *testing.T, issuerRegistry service.Registry) *testEnv {
+	t.Helper()
+	trustStore := trust.NewStubStore()
+	trustStore.AddValidator(trust.NewStubValidator(trust.CredentialTypeBearer))
+
+	dataSourceRegistry := service.NewDataSourceRegistry()
+	tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
+	claimsFilterRegistry := NewStubClaimsFilterRegistry()
+
+	return startTestServer(t, Config{
+		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
+		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
+		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Observer: NoOpObserver{}}),
+		Observer:       NoOpObserver{},
+	})
+}
+
+// newTestSigner creates and starts a DualSlotRotatingSigner with an in-memory
+// key provider of the given type. Fails the test if the signer cannot start.
+func newTestSigner(t *testing.T, namespace string, keyType keys.KeyType, algo string) *keys.DualSlotRotatingSigner {
+	t.Helper()
+	kp := keys.NewInMemoryKeyProvider(keys.InMemoryKeyProviderConfig{KeyType: keyType, Algorithm: algo})
+	signer := keys.NewDualSlotRotatingSigner(keys.DualSlotRotatingSignerConfig{
+		Namespace:           namespace,
+		KeyProviderID:       "test-provider",
+		KeyProviderRegistry: map[string]keys.KeyProvider{"test-provider": kp},
+		SlotStore:           keys.NewInMemoryKeySlotStore(),
+		Observer:            keys.NoOpObserver{},
+	})
+	if err := signer.Start(context.Background()); err != nil {
+		t.Fatalf("Failed to start signer: %v", err)
+	}
+	return signer
+}
+
 // TestJWKSEndpoint tests that the JWKS endpoint returns valid JSON Web Key Sets
 // via the HTTP server.
 func TestJWKSEndpoint(t *testing.T) {
-	ctx := context.Background()
-
-	trustStore := trust.NewStubStore()
-	stubValidator := trust.NewStubValidator(trust.CredentialTypeBearer)
-	trustStore.AddValidator(stubValidator)
-
-	dataSourceRegistry := service.NewDataSourceRegistry()
 	issuerRegistry := service.NewSimpleRegistry()
-
-	kp := keys.NewInMemoryKeyProvider(keys.KeyTypeECP256, "ES256")
-	slotStore := keys.NewInMemoryKeySlotStore()
-	providerRegistry := map[string]keys.KeyProvider{
-		"test-provider": kp,
-	}
-	signer := keys.NewDualSlotRotatingSigner(keys.DualSlotRotatingSignerConfig{
-		Namespace:           string(service.TokenTypeTransactionToken),
-		KeyProviderID:       "test-provider",
-		KeyProviderRegistry: providerRegistry,
-		SlotStore:           slotStore,
-	})
-
-	if err := signer.Start(ctx); err != nil {
-		t.Fatalf("Failed to start signer: %v", err)
-	}
-
+	signer := newTestSigner(t, string(service.TokenTypeTransactionToken), keys.KeyTypeECP256, "ES256")
 	txnIssuer := issuer.NewTransactionTokenIssuer(issuer.TransactionTokenIssuerConfig{
 		IssuerURL:                 "https://parsec.test",
 		TTL:                       5 * time.Minute,
@@ -50,18 +64,9 @@ func TestJWKSEndpoint(t *testing.T) {
 		TransactionContextMappers: []service.ClaimMapper{service.NewPassthroughSubjectMapper()},
 		RequestContextMappers:     []service.ClaimMapper{service.NewRequestAttributesMapper()},
 	})
-
 	issuerRegistry.Register(service.TokenTypeTransactionToken, txnIssuer)
 
-	trustDomain := "parsec.test"
-	tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
-	claimsFilterRegistry := NewStubClaimsFilterRegistry()
-
-	env := startTestServer(t, Config{
-		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
-		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
-	})
+	env := startJWKSTestServer(t, issuerRegistry)
 
 	t.Run("GET /v1/jwks.json", func(t *testing.T) {
 		assertValidJWKS(t, env.HTTPClient, env.HTTPBaseURL+"/v1/jwks.json")
@@ -74,76 +79,29 @@ func TestJWKSEndpoint(t *testing.T) {
 
 // TestJWKSWithMultipleIssuers tests that JWKS returns keys from multiple issuers.
 func TestJWKSWithMultipleIssuers(t *testing.T) {
-	ctx := context.Background()
-
-	trustStore := trust.NewStubStore()
-	stubValidator := trust.NewStubValidator(trust.CredentialTypeBearer)
-	trustStore.AddValidator(stubValidator)
-
-	dataSourceRegistry := service.NewDataSourceRegistry()
 	issuerRegistry := service.NewSimpleRegistry()
 
-	kp1 := keys.NewInMemoryKeyProvider(keys.KeyTypeECP256, "ES256")
-	slotStore1 := keys.NewInMemoryKeySlotStore()
-	providerRegistry1 := map[string]keys.KeyProvider{
-		"test-provider-1": kp1,
-	}
-	rotatingSigner1 := keys.NewDualSlotRotatingSigner(keys.DualSlotRotatingSignerConfig{
-		Namespace:           string(service.TokenTypeTransactionToken),
-		KeyProviderID:       "test-provider-1",
-		KeyProviderRegistry: providerRegistry1,
-		SlotStore:           slotStore1,
-	})
-
-	if err := rotatingSigner1.Start(ctx); err != nil {
-		t.Fatalf("Failed to start rotating signer 1: %v", err)
-	}
-
+	signer1 := newTestSigner(t, string(service.TokenTypeTransactionToken), keys.KeyTypeECP256, "ES256")
 	txnIssuer := issuer.NewTransactionTokenIssuer(issuer.TransactionTokenIssuerConfig{
 		IssuerURL:                 "https://parsec.test",
 		TTL:                       5 * time.Minute,
-		Signer:                    rotatingSigner1,
+		Signer:                    signer1,
 		TransactionContextMappers: []service.ClaimMapper{service.NewPassthroughSubjectMapper()},
 		RequestContextMappers:     []service.ClaimMapper{service.NewRequestAttributesMapper()},
 	})
-
 	issuerRegistry.Register(service.TokenTypeTransactionToken, txnIssuer)
 
-	kp2 := keys.NewInMemoryKeyProvider(keys.KeyTypeECP384, "ES384")
-	slotStore2 := keys.NewInMemoryKeySlotStore()
-	providerRegistry2 := map[string]keys.KeyProvider{
-		"test-provider-2": kp2,
-	}
-	rotatingSigner2 := keys.NewDualSlotRotatingSigner(keys.DualSlotRotatingSignerConfig{
-		Namespace:           string(service.TokenTypeAccessToken),
-		KeyProviderID:       "test-provider-2",
-		KeyProviderRegistry: providerRegistry2,
-		SlotStore:           slotStore2,
-	})
-
-	if err := rotatingSigner2.Start(ctx); err != nil {
-		t.Fatalf("Failed to start rotating signer 2: %v", err)
-	}
-
+	signer2 := newTestSigner(t, string(service.TokenTypeAccessToken), keys.KeyTypeECP384, "ES384")
 	accessIssuer := issuer.NewTransactionTokenIssuer(issuer.TransactionTokenIssuerConfig{
 		IssuerURL:                 "https://parsec.test",
 		TTL:                       15 * time.Minute,
-		Signer:                    rotatingSigner2,
+		Signer:                    signer2,
 		TransactionContextMappers: []service.ClaimMapper{service.NewPassthroughSubjectMapper()},
 		RequestContextMappers:     []service.ClaimMapper{},
 	})
-
 	issuerRegistry.Register(service.TokenTypeAccessToken, accessIssuer)
 
-	trustDomain := "parsec.test"
-	tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
-	claimsFilterRegistry := NewStubClaimsFilterRegistry()
-
-	env := startTestServer(t, Config{
-		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
-		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
-	})
+	env := startJWKSTestServer(t, issuerRegistry)
 
 	resp, err := env.HTTPClient.Get(env.HTTPBaseURL + "/v1/jwks.json")
 	if err != nil {
@@ -182,29 +140,14 @@ func TestJWKSWithMultipleIssuers(t *testing.T) {
 
 // TestJWKSWithUnsignedIssuer tests that unsigned issuers don't contribute keys to JWKS.
 func TestJWKSWithUnsignedIssuer(t *testing.T) {
-	trustStore := trust.NewStubStore()
-	stubValidator := trust.NewStubValidator(trust.CredentialTypeBearer)
-	trustStore.AddValidator(stubValidator)
-
-	dataSourceRegistry := service.NewDataSourceRegistry()
 	issuerRegistry := service.NewSimpleRegistry()
-
 	unsignedIssuer := issuer.NewUnsignedIssuer(issuer.UnsignedIssuerConfig{
 		TokenType:    string(service.TokenTypeTransactionToken),
 		ClaimMappers: []service.ClaimMapper{service.NewPassthroughSubjectMapper()},
 	})
-
 	issuerRegistry.Register(service.TokenTypeTransactionToken, unsignedIssuer)
 
-	trustDomain := "parsec.test"
-	tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
-	claimsFilterRegistry := NewStubClaimsFilterRegistry()
-
-	env := startTestServer(t, Config{
-		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
-		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
-	})
+	env := startJWKSTestServer(t, issuerRegistry)
 
 	resp, err := env.HTTPClient.Get(env.HTTPBaseURL + "/v1/jwks.json")
 	if err != nil {

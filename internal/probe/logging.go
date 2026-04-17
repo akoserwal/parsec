@@ -2,46 +2,94 @@ package probe
 
 import (
 	"context"
-	"log/slog"
+	"time"
+
+	"github.com/rs/zerolog"
 
 	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-// loggingObserver creates request-scoped logging probes
+var _ service.ServiceObserver = (*loggingObserver)(nil)
+
+// loggingObserver creates request-scoped logging probes.
+// Each event type has a pre-built sub-logger with its event name and
+// per-event log level baked in at construction time.
 type loggingObserver struct {
-	service.NoOpApplicationObserver
-	logger *slog.Logger
+	service.NoOpServiceObserver
+	tokenIssuanceLogger zerolog.Logger
+	tokenExchangeLogger zerolog.Logger
+	authzCheckLogger    zerolog.Logger
 }
 
-// LoggingObserverConfig configures the logging observer
+// LoggingObserverConfig configures the logging observer.
+// Each field is a pre-configured zerolog.Logger for one event type,
+// with the "event" field and per-event level already applied.
 type LoggingObserverConfig struct {
-	// Logger is the base logger to use. If nil, uses slog.Default()
-	Logger *slog.Logger
+	TokenIssuanceLogger zerolog.Logger
+	TokenExchangeLogger zerolog.Logger
+	AuthzCheckLogger    zerolog.Logger
 }
 
 // NewLoggingObserver creates an application observer that logs all observability events
-// using structured logging with slog.
-func NewLoggingObserver(logger *slog.Logger) service.ApplicationObserver {
-	if logger == nil {
-		logger = slog.Default()
-	}
+// using structured logging with zerolog. All events inherit the base logger's level.
+func NewLoggingObserver(logger zerolog.Logger) service.ServiceObserver {
 	return NewLoggingObserverWithConfig(LoggingObserverConfig{
-		Logger: logger,
+		TokenIssuanceLogger: logger.With().Str("event", "token_issuance").Logger(),
+		TokenExchangeLogger: logger.With().Str("event", "token_exchange").Logger(),
+		AuthzCheckLogger:    logger.With().Str("event", "authz_check").Logger(),
 	})
 }
 
-// NewLoggingObserverWithConfig creates a logging observer with custom configuration
-func NewLoggingObserverWithConfig(cfg LoggingObserverConfig) service.ApplicationObserver {
-	logger := cfg.Logger
-	if logger == nil {
-		logger = slog.Default()
+// NewLoggingObserverWithConfig creates a logging observer with pre-configured per-event loggers.
+func NewLoggingObserverWithConfig(cfg LoggingObserverConfig) service.ServiceObserver {
+	return &loggingObserver{
+		tokenIssuanceLogger: cfg.TokenIssuanceLogger,
+		tokenExchangeLogger: cfg.TokenExchangeLogger,
+		authzCheckLogger:    cfg.AuthzCheckLogger,
+	}
+}
+
+func tokenIssuanceRequestLogger(
+	base zerolog.Logger,
+	subject *trust.Result,
+	actor *trust.Result,
+	scope string,
+	tokenTypes []service.TokenType,
+) zerolog.Logger {
+	loggerCtx := base.With().
+		Str("scope", scope).
+		Interface("token_types", tokenTypes)
+
+	if subject != nil {
+		loggerCtx = loggerCtx.
+			Str("subject_id", subject.Subject).
+			Str("subject_trust_domain", subject.TrustDomain)
 	}
 
-	return &loggingObserver{
-		logger: logger,
+	if actor != nil {
+		loggerCtx = loggerCtx.
+			Str("actor_id", actor.Subject).
+			Str("actor_trust_domain", actor.TrustDomain)
 	}
+
+	return loggerCtx.Logger()
+}
+
+func tokenExchangeRequestLogger(
+	base zerolog.Logger,
+	grantType string,
+	requestedTokenType string,
+	audience string,
+	scope string,
+) zerolog.Logger {
+	return base.With().
+		Str("grant_type", grantType).
+		Str("requested_token_type", requestedTokenType).
+		Str("audience", audience).
+		Str("scope", scope).
+		Logger()
 }
 
 func (o *loggingObserver) TokenIssuanceStarted(
@@ -51,84 +99,59 @@ func (o *loggingObserver) TokenIssuanceStarted(
 	scope string,
 	tokenTypes []service.TokenType,
 ) (context.Context, service.TokenIssuanceProbe) {
-	// Create scoped logger for this probe type
-	probeLogger := o.logger.With("event", "token_issuance")
+	requestLogger := tokenIssuanceRequestLogger(o.tokenIssuanceLogger, subject, actor, scope, tokenTypes)
+	requestLogger.Debug().Msg("Starting token issuance")
 
-	attrs := []slog.Attr{
-		slog.String("scope", scope),
-		slog.Any("token_types", tokenTypes),
-	}
-
-	if subject != nil {
-		attrs = append(attrs,
-			slog.String("subject_id", subject.Subject),
-			slog.String("subject_trust_domain", subject.TrustDomain),
-		)
-	}
-
-	if actor != nil {
-		attrs = append(attrs,
-			slog.String("actor_id", actor.Subject),
-			slog.String("actor_trust_domain", actor.TrustDomain),
-		)
-	}
-
-	probeLogger.LogAttrs(ctx, slog.LevelDebug, "Starting token issuance", attrs...)
-
-	// Return a request-scoped probe that captures the context
 	return ctx, &loggingTokenIssuanceProbe{
-		ctx:    ctx,
-		logger: probeLogger,
+		logger:    requestLogger,
+		startTime: time.Now(),
 	}
 }
 
 // loggingTokenIssuanceProbe is a request-scoped probe that logs events for a single token issuance
 type loggingTokenIssuanceProbe struct {
 	service.NoOpTokenIssuanceProbe
-	ctx    context.Context
-	logger *slog.Logger
+	logger    zerolog.Logger
+	startTime time.Time
 }
 
 func (p *loggingTokenIssuanceProbe) TokenTypeIssuanceStarted(tokenType service.TokenType) {
-	p.logger.LogAttrs(p.ctx, slog.LevelDebug,
-		"Issuing token",
-		slog.String("token_type", string(tokenType)),
-	)
+	p.logger.Debug().
+		Str("token_type", string(tokenType)).
+		Msg("Issuing token")
 }
 
 func (p *loggingTokenIssuanceProbe) TokenTypeIssuanceSucceeded(tokenType service.TokenType, token *service.Token) {
-	attrs := []slog.Attr{
-		slog.String("token_type", string(tokenType)),
-	}
+	event := p.logger.Debug().
+		Str("token_type", string(tokenType))
 
 	if token != nil {
-		attrs = append(attrs,
-			slog.Time("issued_at", token.IssuedAt),
-			slog.Time("expires_at", token.ExpiresAt),
-		)
+		event = event.
+			Time("issued_at", token.IssuedAt).
+			Time("expires_at", token.ExpiresAt)
 	}
 
-	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "Token issued successfully", attrs...)
+	event.Msg("Token issued successfully")
 }
 
 func (p *loggingTokenIssuanceProbe) TokenTypeIssuanceFailed(tokenType service.TokenType, err error) {
-	p.logger.LogAttrs(p.ctx, slog.LevelError,
-		"Token issuance failed",
-		slog.String("token_type", string(tokenType)),
-		slog.String("error", err.Error()),
-	)
+	p.logger.Error().
+		Str("token_type", string(tokenType)).
+		Err(err).
+		Msg("Token issuance failed")
 }
 
 func (p *loggingTokenIssuanceProbe) IssuerNotFound(tokenType service.TokenType, err error) {
-	p.logger.LogAttrs(p.ctx, slog.LevelError,
-		"No issuer found for token type",
-		slog.String("token_type", string(tokenType)),
-		slog.String("error", err.Error()),
-	)
+	p.logger.Error().
+		Str("token_type", string(tokenType)).
+		Err(err).
+		Msg("No issuer found for token type")
 }
 
 func (p *loggingTokenIssuanceProbe) End() {
-	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "Token issuance completed")
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("Token issuance completed")
 }
 
 // TokenExchangeStarted implements service.TokenExchangeObserver
@@ -139,164 +162,148 @@ func (o *loggingObserver) TokenExchangeStarted(
 	audience string,
 	scope string,
 ) (context.Context, service.TokenExchangeProbe) {
-	// Create scoped logger for this probe type
-	probeLogger := o.logger.With("event", "token_exchange")
-
-	probeLogger.LogAttrs(ctx, slog.LevelDebug,
-		"Starting token exchange",
-		slog.String("grant_type", grantType),
-		slog.String("requested_token_type", requestedTokenType),
-		slog.String("audience", audience),
-		slog.String("scope", scope),
-	)
+	requestLogger := tokenExchangeRequestLogger(o.tokenExchangeLogger, grantType, requestedTokenType, audience, scope)
+	requestLogger.Debug().Msg("Starting token exchange")
 
 	return ctx, &loggingTokenExchangeProbe{
-		ctx:    ctx,
-		logger: probeLogger,
+		logger:    requestLogger,
+		startTime: time.Now(),
 	}
 }
 
 // loggingTokenExchangeProbe is a request-scoped probe that logs token exchange events
 type loggingTokenExchangeProbe struct {
 	service.NoOpTokenExchangeProbe
-	ctx    context.Context
-	logger *slog.Logger
+	logger    zerolog.Logger
+	startTime time.Time
 }
 
 func (p *loggingTokenExchangeProbe) ActorValidationSucceeded(actor *trust.Result) {
-	attrs := []slog.Attr{}
+	event := p.logger.Debug()
 	if actor != nil {
-		attrs = append(attrs,
-			slog.String("actor_id", actor.Subject),
-			slog.String("actor_trust_domain", actor.TrustDomain),
-		)
+		event = event.
+			Str("actor_id", actor.Subject).
+			Str("actor_trust_domain", actor.TrustDomain)
 	}
-	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "Actor validation succeeded", attrs...)
+	event.Msg("Actor validation succeeded")
 }
 
 func (p *loggingTokenExchangeProbe) ActorValidationFailed(err error) {
-	p.logger.LogAttrs(p.ctx, slog.LevelError,
-		"Actor validation failed",
-		slog.String("error", err.Error()),
-	)
+	p.logger.Error().
+		Err(err).
+		Msg("Actor validation failed")
 }
 
 func (p *loggingTokenExchangeProbe) RequestContextParsed(attrs *request.RequestAttributes) {
-	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "Request context parsed")
+	p.logger.Debug().Msg("Request context parsed")
 }
 
 func (p *loggingTokenExchangeProbe) RequestContextParseFailed(err error) {
-	p.logger.LogAttrs(p.ctx, slog.LevelError,
-		"Request context parse failed",
-		slog.String("error", err.Error()),
-	)
+	p.logger.Error().
+		Err(err).
+		Msg("Request context parse failed")
 }
 
 func (p *loggingTokenExchangeProbe) SubjectTokenValidationSucceeded(subject *trust.Result) {
-	attrs := []slog.Attr{}
+	event := p.logger.Debug()
 	if subject != nil {
-		attrs = append(attrs,
-			slog.String("subject_id", subject.Subject),
-			slog.String("subject_trust_domain", subject.TrustDomain),
-		)
+		event = event.
+			Str("subject_id", subject.Subject).
+			Str("subject_trust_domain", subject.TrustDomain)
 	}
-	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "Subject token validation succeeded", attrs...)
+	event.Msg("Subject token validation succeeded")
 }
 
 func (p *loggingTokenExchangeProbe) SubjectTokenValidationFailed(err error) {
-	p.logger.LogAttrs(p.ctx, slog.LevelError,
-		"Subject token validation failed",
-		slog.String("error", err.Error()),
-	)
+	p.logger.Error().
+		Err(err).
+		Msg("Subject token validation failed")
 }
 
 func (p *loggingTokenExchangeProbe) End() {
-	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "Token exchange completed")
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("Token exchange completed")
 }
 
 // AuthzCheckStarted implements service.AuthzCheckObserver
 func (o *loggingObserver) AuthzCheckStarted(
 	ctx context.Context,
 ) (context.Context, service.AuthzCheckProbe) {
-	// Create scoped logger for this probe type
-	probeLogger := o.logger.With("event", "authz_check")
-
-	probeLogger.LogAttrs(ctx, slog.LevelDebug, "Starting authorization check")
+	// AuthzCheckStarted receives no request-scoped parameters (unlike
+	// token issuance/exchange), so we use the base event logger directly.
+	requestLogger := o.authzCheckLogger
+	requestLogger.Debug().Msg("Starting authorization check")
 
 	return ctx, &loggingAuthzCheckProbe{
-		ctx:    ctx,
-		logger: probeLogger,
+		logger:    requestLogger,
+		startTime: time.Now(),
 	}
 }
 
 // loggingAuthzCheckProbe is a request-scoped probe that logs authorization check events
 type loggingAuthzCheckProbe struct {
 	service.NoOpAuthzCheckProbe
-	ctx    context.Context
-	logger *slog.Logger
+	logger    zerolog.Logger
+	startTime time.Time
 }
 
 func (p *loggingAuthzCheckProbe) RequestAttributesParsed(attrs *request.RequestAttributes) {
-	logAttrs := []slog.Attr{}
+	event := p.logger.Debug()
 	if attrs != nil {
-		logAttrs = append(logAttrs,
-			slog.String("method", attrs.Method),
-			slog.String("path", attrs.Path),
-		)
+		event = event.
+			Str("method", attrs.Method).
+			Str("path", attrs.Path)
 	}
-	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "Request attributes parsed", logAttrs...)
+	event.Msg("Request attributes parsed")
 }
 
 func (p *loggingAuthzCheckProbe) ActorValidationSucceeded(actor *trust.Result) {
-	attrs := []slog.Attr{}
+	event := p.logger.Debug()
 	if actor != nil {
-		attrs = append(attrs,
-			slog.String("actor_id", actor.Subject),
-			slog.String("actor_trust_domain", actor.TrustDomain),
-		)
+		event = event.
+			Str("actor_id", actor.Subject).
+			Str("actor_trust_domain", actor.TrustDomain)
 	}
-	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "Actor validation succeeded", attrs...)
+	event.Msg("Actor validation succeeded")
 }
 
 func (p *loggingAuthzCheckProbe) ActorValidationFailed(err error) {
-	p.logger.LogAttrs(p.ctx, slog.LevelError,
-		"Actor validation failed",
-		slog.String("error", err.Error()),
-	)
+	p.logger.Error().
+		Err(err).
+		Msg("Actor validation failed")
 }
 
 func (p *loggingAuthzCheckProbe) SubjectCredentialExtracted(cred trust.Credential, headersUsed []string) {
-	p.logger.LogAttrs(p.ctx, slog.LevelDebug,
-		"Subject credential extracted",
-		slog.String("credential_type", string(cred.Type())),
-	)
+	p.logger.Debug().
+		Str("credential_type", string(cred.Type())).
+		Msg("Subject credential extracted")
 }
 
 func (p *loggingAuthzCheckProbe) SubjectCredentialExtractionFailed(err error) {
-	p.logger.LogAttrs(p.ctx, slog.LevelError,
-		"Subject credential extraction failed",
-		slog.String("error", err.Error()),
-	)
+	p.logger.Error().
+		Err(err).
+		Msg("Subject credential extraction failed")
 }
 
 func (p *loggingAuthzCheckProbe) SubjectValidationSucceeded(subject *trust.Result) {
-	attrs := []slog.Attr{}
+	event := p.logger.Debug()
 	if subject != nil {
-		attrs = append(attrs,
-			slog.String("subject_id", subject.Subject),
-			slog.String("subject_trust_domain", subject.TrustDomain),
-		)
+		event = event.
+			Str("subject_id", subject.Subject).
+			Str("subject_trust_domain", subject.TrustDomain)
 	}
-	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "Subject validation succeeded", attrs...)
+	event.Msg("Subject validation succeeded")
 }
 
 func (p *loggingAuthzCheckProbe) SubjectValidationFailed(err error) {
-	p.logger.LogAttrs(p.ctx, slog.LevelError,
-		"Subject validation failed",
-		slog.String("error", err.Error()),
-	)
+	p.logger.Error().
+		Err(err).
+		Msg("Subject validation failed")
 }
 
 func (p *loggingAuthzCheckProbe) End() {
-	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "Authorization check completed")
+	p.logger.Debug().
+		Dur("duration", time.Since(p.startTime)).
+		Msg("Authorization check completed")
 }

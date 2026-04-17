@@ -14,7 +14,7 @@ import (
 
 const testTokenType = "urn:ietf:params:oauth:token-type:txn_token"
 
-// Mock KeyProvider for failure injection
+// failKeyProvider wraps InMemoryKeyProvider with error injection for testing rotation failures.
 type failKeyProvider struct {
 	*InMemoryKeyProvider
 	failCreate bool
@@ -53,7 +53,7 @@ func (h *failKeyHandle) Rotate(ctx context.Context) error {
 func newTestDualSlotRotatingSigner(t *testing.T, clk clock.Clock, slotStore KeySlotStore, keyProvider KeyProvider) (*DualSlotRotatingSigner, KeyProvider) {
 	if keyProvider == nil {
 		// Create an in-memory KeyProvider with EC-P256 key type
-		keyProvider = NewInMemoryKeyProvider(KeyTypeECP256, "ES256")
+		keyProvider = NewInMemoryKeyProvider(InMemoryKeyProviderConfig{KeyType: KeyTypeECP256, Algorithm: "ES256"})
 	}
 
 	// Create in-memory slot store if needed
@@ -68,17 +68,17 @@ func newTestDualSlotRotatingSigner(t *testing.T, clk clock.Clock, slotStore KeyS
 
 	// Create rotating signer with short timings for testing
 	rs := NewDualSlotRotatingSigner(DualSlotRotatingSignerConfig{
-		Namespace:           testTokenType, // Test namespace
+		Namespace:           testTokenType,
 		KeyProviderID:       "test-provider",
 		KeyProviderRegistry: kpRegistry,
 		SlotStore:           slotStore,
 		Clock:               clk,
-		// Short timings for faster tests
-		KeyTTL:            30 * time.Minute, // Longer to avoid premature expiration
-		RotationThreshold: 8 * time.Minute,  // Rotate when 8m remaining
-		GracePeriod:       2 * time.Minute,
-		CheckInterval:     10 * time.Second,
-		PrepareTimeout:    1 * time.Minute,
+		KeyTTL:              30 * time.Minute,
+		RotationThreshold:   8 * time.Minute,
+		GracePeriod:         2 * time.Minute,
+		CheckInterval:       10 * time.Second,
+		PrepareTimeout:      1 * time.Minute,
+		Observer:            NoOpObserver{},
 	})
 
 	return rs, keyProvider
@@ -87,11 +87,10 @@ func newTestDualSlotRotatingSigner(t *testing.T, clk clock.Clock, slotStore KeyS
 func TestDualSlotRotatingSigner_RotationFailure_MaintainsOldKey(t *testing.T) {
 	clk := clock.NewFixtureClock(time.Time{})
 
-	// Setup backing key provider that we can make fail
-	baseProvider := NewInMemoryKeyProvider(KeyTypeECP256, "ES256")
-	mockProvider := &failKeyProvider{InMemoryKeyProvider: baseProvider}
+	baseProvider := NewInMemoryKeyProvider(InMemoryKeyProviderConfig{KeyType: KeyTypeECP256, Algorithm: "ES256"})
+	stubProvider := &failKeyProvider{InMemoryKeyProvider: baseProvider}
 
-	rs, _ := newTestDualSlotRotatingSigner(t, clk, nil, mockProvider)
+	rs, _ := newTestDualSlotRotatingSigner(t, clk, nil, stubProvider)
 
 	ctx := context.Background()
 
@@ -109,8 +108,7 @@ func TestDualSlotRotatingSigner_RotationFailure_MaintainsOldKey(t *testing.T) {
 	// KeyTTL=30m, Threshold=8m => Rotate at 22m
 	clk.Advance(21 * time.Minute)
 
-	// 3. Set mockProvider to fail BEFORE rotation is attempted
-	mockProvider.failCreate = true
+	stubProvider.failCreate = true
 
 	// 4. Advance past rotation threshold (to 23m)
 	clk.Advance(2 * time.Minute)
@@ -617,7 +615,7 @@ func TestDualSlotRotatingSigner_ExistingKeyInGracePeriod(t *testing.T) {
 
 func TestDualSlotRotatingSigner_Namespacing(t *testing.T) {
 	clk := clock.NewFixtureClock(time.Time{})
-	provider := NewInMemoryKeyProvider(KeyTypeECP256, "ES256")
+	provider := NewInMemoryKeyProvider(InMemoryKeyProviderConfig{KeyType: KeyTypeECP256, Algorithm: "ES256"})
 	providerRegistry := map[string]KeyProvider{"test-provider": provider}
 	slotStore := NewInMemoryKeySlotStore()
 
@@ -631,6 +629,7 @@ func TestDualSlotRotatingSigner_Namespacing(t *testing.T) {
 		SlotStore:           slotStore,
 		Clock:               clk,
 		PrepareTimeout:      1 * time.Minute,
+		Observer:            NoOpObserver{},
 	})
 
 	ctx := context.Background()

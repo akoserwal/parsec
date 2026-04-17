@@ -7,7 +7,6 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
-	"log/slog"
 	"math/big"
 	"sync"
 	"time"
@@ -26,7 +25,7 @@ type JWKSServer struct {
 	issuerRegistry  service.Registry
 	clock           clock.Clock
 	refreshInterval time.Duration
-	logger          *slog.Logger
+	observer        JWKSObserver
 
 	// Cached response
 	mu             sync.RWMutex
@@ -49,11 +48,11 @@ type JWKSServerConfig struct {
 	// Clock is used for time operations (defaults to system clock)
 	Clock clock.Clock
 
-	// Logger is the structured logger to use (required)
-	Logger *slog.Logger
+	// Observer for JWKS cache events. Defaults to NoOpObserver{} if nil.
+	Observer JWKSObserver
 }
 
-// NewJWKSServer creates a new JWKS server with caching
+// NewJWKSServer creates a new JWKS server with caching.
 func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 	if cfg.RefreshInterval == 0 {
 		cfg.RefreshInterval = 1 * time.Minute
@@ -61,27 +60,28 @@ func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 	if cfg.Clock == nil {
 		cfg.Clock = clock.NewSystemClock()
 	}
+	if cfg.Observer == nil {
+		cfg.Observer = NoOpObserver{}
+	}
 	return &JWKSServer{
 		issuerRegistry:  cfg.IssuerRegistry,
 		clock:           cfg.Clock,
 		refreshInterval: cfg.RefreshInterval,
-		logger:          cfg.Logger,
+		observer:        cfg.Observer,
 	}
 }
 
 // Start begins the background cache refresh
 func (s *JWKSServer) Start(ctx context.Context) error {
-	// Populate cache immediately
+	ctx, p := s.observer.InitPopulationStarted(ctx)
+	defer p.End()
 	if err := s.refreshCache(ctx); err != nil {
-		s.logger.Warn("initial cache population failed, will retry", "error", err)
+		p.InitialCachePopulationFailed(err)
 	}
 
-	// Start background refresh
 	s.ticker = s.clock.Ticker(s.refreshInterval)
 	return s.ticker.Start(func(ctx context.Context) {
-		if err := s.refreshCache(ctx); err != nil {
-			s.logger.Warn("background cache refresh failed", "error", err)
-		}
+		_ = s.refreshCache(ctx)
 	})
 }
 
@@ -95,30 +95,38 @@ func (s *JWKSServer) Stop() {
 // GetJWKS implements the JWKS service
 // Returns a cached JSON Web Key Set containing all public keys from all configured issuers
 func (s *JWKSServer) GetJWKS(ctx context.Context, req *parsecv1.GetJWKSRequest) (*parsecv1.GetJWKSResponse, error) {
-	// Try to serve from cache first
 	s.mu.RLock()
 	cachedResp := s.cachedResponse
 	cachedErr := s.cachedError
 	s.mu.RUnlock()
 
-	// If cache is populated, return it
 	if cachedResp != nil {
 		return cachedResp, nil
 	}
 
-	// If cache has an error and no response, return the error
 	if cachedErr != nil {
 		return nil, cachedErr
 	}
 
-	// Cache is empty (first request or failed initial population)
-	// Build the response synchronously to ensure immediate availability
-	return s.buildJWKSResponse(ctx)
+	// Cache is empty (first request or failed initial population).
+	// Refresh synchronously to ensure immediate availability.
+	_ = s.refreshCache(ctx)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.cachedResponse != nil {
+		return s.cachedResponse, nil
+	}
+	return nil, s.cachedError
 }
 
-// refreshCache updates the cached JWKS response in the background
+// refreshCache builds a fresh JWKS response and updates the cache.
+// It creates its own probe via the observer for the duration of the operation.
 func (s *JWKSServer) refreshCache(ctx context.Context) error {
-	resp, err := s.buildJWKSResponse(ctx)
+	ctx, p := s.observer.CacheRefreshStarted(ctx)
+	defer p.End()
+
+	resp, err := s.buildJWKSResponse(ctx, p)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -127,18 +135,20 @@ func (s *JWKSServer) refreshCache(ctx context.Context) error {
 		s.cachedResponse = resp
 		s.cachedError = nil
 	} else {
-		// Only cache the error if we don't have a previous successful response
-		// This ensures we keep serving stale data rather than failing
 		if s.cachedResponse == nil {
 			s.cachedError = err
 		}
 	}
 
+	if err != nil {
+		p.CacheRefreshFailed(err)
+	}
 	return err
 }
 
-// buildJWKSResponse builds a fresh JWKS response from all issuers
-func (s *JWKSServer) buildJWKSResponse(ctx context.Context) (*parsecv1.GetJWKSResponse, error) {
+// buildJWKSResponse builds a fresh JWKS response from all issuers.
+// It is a private helper of refreshCache (same logical operation).
+func (s *JWKSServer) buildJWKSResponse(ctx context.Context, p CacheRefreshProbe) (*parsecv1.GetJWKSResponse, error) {
 	// Get all public keys from all issuers at once
 	publicKeys, err := s.issuerRegistry.GetAllPublicKeys(ctx)
 
@@ -156,7 +166,7 @@ func (s *JWKSServer) buildJWKSResponse(ctx context.Context) (*parsecv1.GetJWKSRe
 	for _, pk := range publicKeys {
 		jwk, err := convertToJSONWebKey(pk)
 		if err != nil {
-			// Skip keys that can't be converted
+			p.KeyConversionFailed(pk.KeyID, err)
 			continue
 		}
 		allKeys = append(allKeys, jwk)

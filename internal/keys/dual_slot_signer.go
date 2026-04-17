@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"sync"
 	"time"
 
@@ -59,8 +58,9 @@ type DualSlotRotatingSigner struct {
 	activeAlg        Algorithm           // JWT Algorithm
 	publicKeys       []service.PublicKey // All non-expired public keys
 
-	clock  clock.Clock
-	ticker clock.Ticker
+	clock    clock.Clock
+	ticker   clock.Ticker
+	observer RotatingSignerObserver
 }
 
 // DualSlotRotatingSignerConfig configures the DualSlotRotatingSigner
@@ -78,9 +78,12 @@ type DualSlotRotatingSignerConfig struct {
 	GracePeriod       time.Duration
 	CheckInterval     time.Duration
 	PrepareTimeout    time.Duration // How long to wait before retrying a stuck "preparing" state (default: 1 minute)
+
+	// Observer must be non-nil; use NoOpObserver{} in tests.
+	Observer RotatingSignerObserver
 }
 
-// NewDualSlotRotatingSigner creates a new dual-slot rotating signer
+// NewDualSlotRotatingSigner creates a new dual-slot rotating signer.
 func NewDualSlotRotatingSigner(cfg DualSlotRotatingSignerConfig) *DualSlotRotatingSigner {
 	clk := cfg.Clock
 	if clk == nil {
@@ -112,6 +115,11 @@ func NewDualSlotRotatingSigner(cfg DualSlotRotatingSignerConfig) *DualSlotRotati
 		prepareTimeout = 1 * time.Minute
 	}
 
+	obs := cfg.Observer
+	if obs == nil {
+		obs = NoOpObserver{}
+	}
+
 	return &DualSlotRotatingSigner{
 		namespace:           cfg.Namespace,
 		trustDomain:         cfg.TrustDomain,
@@ -124,6 +132,7 @@ func NewDualSlotRotatingSigner(cfg DualSlotRotatingSignerConfig) *DualSlotRotati
 		checkInterval:       checkInterval,
 		prepareTimeout:      prepareTimeout,
 		clock:               clk,
+		observer:            obs,
 	}
 }
 
@@ -165,13 +174,14 @@ func (r *DualSlotRotatingSigner) Stop() {
 
 // doRotationCheck is called periodically by the ticker to check for rotation needs
 func (r *DualSlotRotatingSigner) doRotationCheck(ctx context.Context) {
-	if err := r.checkAndRotate(ctx); err != nil {
-		log.Printf("Error during key rotation check: %v", err)
+	ctx, p := r.observer.RotationCheckStarted(ctx)
+	defer p.End()
+
+	if err := r.doCheckAndRotate(ctx, p); err != nil {
+		p.RotationCheckFailed(err)
 	}
-	// Update active key cache after each check (whether rotation happened or not)
-	if err := r.updateActiveKeyCache(ctx); err != nil {
-		log.Printf("Error updating active key cache: %v", err)
-	}
+	// Key-cache failures are reported on KeyCacheUpdateProbe inside updateActiveKeyCache.
+	_ = r.updateActiveKeyCache(ctx)
 }
 
 // contextSigner wraps a KeyHandle to implement crypto.Signer with context and mismatch detection
@@ -283,8 +293,7 @@ func (r *DualSlotRotatingSigner) ensureInitialKey(ctx context.Context) error {
 	return nil
 }
 
-// checkAndRotate checks if rotation is needed and performs it using two-phase rotation
-func (r *DualSlotRotatingSigner) checkAndRotate(ctx context.Context) error {
+func (r *DualSlotRotatingSigner) doCheckAndRotate(ctx context.Context, p RotationCheckProbe) error {
 	// 1. Read all slots and store version
 	slots, storeVersion, err := r.slotStore.ListSlots(ctx)
 	if err != nil {
@@ -357,14 +366,14 @@ func (r *DualSlotRotatingSigner) checkAndRotate(ctx context.Context) error {
 
 	_, err = r.slotStore.SaveSlot(ctx, targetSlot, storeVersion)
 	if errors.Is(err, ErrVersionMismatch) {
-		log.Printf("Another process completed rotation for slot %s, skipping", targetSlot.Position)
+		p.RotationSkippedVersionRace(string(targetSlot.Position))
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("failed to save slot: %w", err)
 	}
 
-	log.Printf("Completed rotation for slot %s", targetSlot.Position)
+	p.RotationCompleted(string(targetSlot.Position))
 
 	return nil
 }
@@ -458,8 +467,12 @@ func (r *DualSlotRotatingSigner) selectSlotsForRotation(slotA, slotB *KeySlot) (
 
 // updateActiveKeyCache queries the state store and updates the cached active key and public keys
 func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context) error {
+	ctx, p := r.observer.KeyCacheUpdateStarted(ctx)
+	defer p.End()
+
 	slots, _, err := r.slotStore.ListSlots(ctx)
 	if err != nil {
+		p.KeyCacheUpdateFailed(err)
 		return fmt.Errorf("failed to list slots: %w", err)
 	}
 
@@ -473,7 +486,9 @@ func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context) error
 	}
 
 	if len(mySlots) == 0 {
-		return errors.New("no slots available for this token type")
+		err := errors.New("no slots available for this token type")
+		p.KeyCacheUpdateFailed(err)
+		return err
 	}
 
 	now := r.clock.Now()
@@ -502,26 +517,26 @@ func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context) error
 		// Get the KeyProvider that created this key
 		provider, ok := r.keyProviderRegistry[slot.KeyProviderID]
 		if !ok {
-			log.Printf("Warning: key provider %s not found for slot %s, skipping", slot.KeyProviderID, slot.Position)
+			p.KeyProviderNotFound(slot.KeyProviderID, string(slot.Position))
 			continue
 		}
 
 		keyName := r.keyName(slot.Position)
 		handle, err := provider.GetKeyHandle(ctx, r.trustDomain, r.namespace, keyName)
 		if err != nil {
-			log.Printf("Warning: failed to get handle %s from key provider: %v", slot.Position, err)
+			p.KeyHandleFailed(string(slot.Position), err)
 			continue
 		}
 
 		pubKey, err := handle.Public(ctx)
 		if err != nil {
-			log.Printf("Warning: failed to get public key for %s: %v", slot.Position, err)
+			p.PublicKeyFailed(string(slot.Position), err)
 			continue
 		}
 
 		thumbprintStr, err := ComputeThumbprint(pubKey)
 		if err != nil {
-			log.Printf("Warning: failed to compute thumbprint for key %s: %v", slot.Position, err)
+			p.ThumbprintFailed(string(slot.Position), err)
 			continue
 		}
 		thumbprint := KeyID(thumbprintStr)
@@ -529,7 +544,7 @@ func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context) error
 
 		_, algStr, err := handle.Metadata(ctx)
 		if err != nil {
-			log.Printf("Warning: failed to get metadata for %s: %v", slot.Position, err)
+			p.MetadataFailed(string(slot.Position), err)
 			continue
 		}
 		alg := Algorithm(algStr)
@@ -569,24 +584,32 @@ func (r *DualSlotRotatingSigner) updateActiveKeyCache(ctx context.Context) error
 	}
 
 	if activeSlot == nil {
-		return errors.New("no keys available")
+		err := errors.New("no keys available")
+		p.KeyCacheUpdateFailed(err)
+		return err
 	}
 
 	// Get the KeyProvider that created the active key
 	provider, ok := r.keyProviderRegistry[activeSlot.KeyProviderID]
 	if !ok {
-		return fmt.Errorf("key provider %s not found for active slot", activeSlot.KeyProviderID)
+		err := fmt.Errorf("key provider %s not found for active slot", activeSlot.KeyProviderID)
+		p.KeyCacheUpdateFailed(err)
+		return err
 	}
 
 	keyName := r.keyName(activeSlot.Position)
 	activeHandle, err := provider.GetKeyHandle(ctx, r.trustDomain, r.namespace, keyName)
 	if err != nil {
-		return fmt.Errorf("failed to get active handle %s: %w", activeSlot.Position, err)
+		err = fmt.Errorf("failed to get active handle %s: %w", activeSlot.Position, err)
+		p.KeyCacheUpdateFailed(err)
+		return err
 	}
 
 	internalID, algStr, err := activeHandle.Metadata(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get active metadata %s: %w", activeSlot.Position, err)
+		err = fmt.Errorf("failed to get active metadata %s: %w", activeSlot.Position, err)
+		p.KeyCacheUpdateFailed(err)
+		return err
 	}
 	alg := Algorithm(algStr)
 

@@ -9,6 +9,18 @@ import (
 	"github.com/project-kessel/parsec/internal/claims"
 )
 
+// newTestFilteredStore creates a FilteredStore pre-wired with a NoOpObserver.
+// Callers can pass additional options (e.g. WithCELFilter) as needed.
+func newTestFilteredStore(t *testing.T, opts ...FilteredStoreOption) *FilteredStore {
+	t.Helper()
+	allOpts := append([]FilteredStoreOption{WithObserver(NoOpObserver{})}, opts...)
+	store, err := NewFilteredStore(allOpts...)
+	if err != nil {
+		t.Fatalf("failed to create filtered store: %v", err)
+	}
+	return store
+}
+
 func TestFilteredStore_ForActor(t *testing.T) {
 	ctx := context.Background()
 
@@ -142,13 +154,8 @@ func TestFilteredStore_ForActor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create filtered store with CEL filter
-			store, err := NewFilteredStore(WithCELFilter(tt.filterScript))
-			if err != nil {
-				t.Fatalf("failed to create filtered store: %v", err)
-			}
+			store := newTestFilteredStore(t, WithCELFilter(tt.filterScript))
 
-			// Add validators
 			for name, validator := range tt.validators {
 				store.AddValidator(name, validator)
 			}
@@ -202,14 +209,9 @@ func TestFilteredStore_Validate(t *testing.T) {
 			TrustDomain: "test-domain",
 		})
 
-	store, err := NewFilteredStore()
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
-
+	store := newTestFilteredStore(t)
 	store.AddValidator("test-validator", validator)
 
-	// Test validation
 	cred := &BearerCredential{Token: "test-token"}
 	result, err := store.Validate(ctx, cred)
 	if err != nil {
@@ -231,12 +233,7 @@ func TestFilteredStore_NoFilterReturnsAllValidators(t *testing.T) {
 
 	validator := NewStubValidator(CredentialTypeBearer)
 
-	// Create store without filter
-	store, err := NewFilteredStore()
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
-
+	store := newTestFilteredStore(t)
 	store.AddValidator("test-validator", validator)
 
 	actor := &Result{
@@ -258,19 +255,16 @@ func TestFilteredStore_NoFilterReturnsAllValidators(t *testing.T) {
 func TestFilteredStore_NilActorError(t *testing.T) {
 	ctx := context.Background()
 
-	store, err := NewFilteredStore(WithCELFilter(`true`))
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+	store := newTestFilteredStore(t, WithCELFilter(`true`))
 
-	_, err = store.ForActor(ctx, nil, nil)
+	_, err := store.ForActor(ctx, nil, nil)
 	if err == nil {
 		t.Errorf("expected error for nil actor, got nil")
 	}
 }
 
 func TestConvertResultToMap(t *testing.T) {
-	now := time.Now()
+	fixed := time.Date(2024, 3, 15, 12, 0, 0, 0, time.UTC)
 	result := &Result{
 		Subject:     "test-subject",
 		Issuer:      "https://test.example.com",
@@ -279,8 +273,8 @@ func TestConvertResultToMap(t *testing.T) {
 			"email": "test@example.com",
 			"role":  "admin",
 		},
-		ExpiresAt: now,
-		IssuedAt:  now,
+		ExpiresAt: fixed,
+		IssuedAt:  fixed,
 		Audience:  []string{"aud1", "aud2"},
 		Scope:     "read write",
 	}
@@ -344,9 +338,9 @@ func TestFilteredStore_InvalidCELScript(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewFilteredStore(WithCELFilter(tt.script))
+			_, err := NewFilteredStore(WithCELFilter(tt.script), WithObserver(NoOpObserver{}))
 			if err == nil {
-				t.Errorf("expected error for invalid script, got nil")
+				t.Error("expected error for invalid script, got nil")
 			}
 		})
 	}

@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/project-kessel/parsec/internal/config"
@@ -60,13 +61,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	bootstrapLog := zerolog.New(os.Stdout).With().Timestamp().Logger()
+
 	// 1. Determine config file path
 	configPath := configFile
 	if configPath == "" {
-		// Check environment variable
 		configPath = os.Getenv("PARSEC_CONFIG")
 	}
-	// If still empty, configPath remains empty and we'll use env vars/flags only
 
 	// 2. Load configuration (file + env vars + flags)
 	loader, err := config.NewLoaderWithFlags(configPath, cmd.Flags())
@@ -79,21 +80,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	// 3. Create provider to build all components from config
+	// 3. Create provider and build components
 	provider := config.NewProvider(cfg)
 
-	// 4. Create logger and observer — single instance shared across all components
-	logger := config.NewLogger(cfg.Observability)
-
-	observer, err := config.NewObserverWithLogger(cfg.Observability, logger)
+	logger, err := provider.Observer()
 	if err != nil {
 		return fmt.Errorf("failed to create observer: %w", err)
 	}
 
-	// Inject into provider so TokenService and other internal components use the same observer
-	provider.SetObserver(observer)
-
-	// 5. Build components via provider
 	trustStore, err := provider.TrustStore()
 	if err != nil {
 		return fmt.Errorf("failed to create trust store: %w", err)
@@ -111,29 +105,28 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	claimsFilterRegistry, err := provider.ExchangeServerClaimsFilterRegistry()
 	if err != nil {
-		return fmt.Errorf("failed to get exchange server claims filter registry: %w", err)
+		return fmt.Errorf("failed to create claims filter registry: %w", err)
 	}
 
 	issuerRegistry, err := provider.IssuerRegistry()
 	if err != nil {
-		return fmt.Errorf("failed to get issuer registry: %w", err)
+		return fmt.Errorf("failed to create issuer registry: %w", err)
 	}
 
-	// 6. Create service handlers with observability
-	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, observer)
-	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, observer)
+	// 4. Create service handlers
+	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, logger)
+	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, logger)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
 		IssuerRegistry: issuerRegistry,
-		Logger:         logger,
+		Observer:       logger,
 	})
 
-	// Start JWKS background refresh
 	if err := jwksServer.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start JWKS server: %w", err)
 	}
 	defer jwksServer.Stop()
 
-	// 7. Create TCP listeners from configured ports
+	// 5. Create TCP listeners
 	grpcListener, err := net.Listen("tcp", fmt.Sprintf(":%d", provider.GRPCPort()))
 	if err != nil {
 		return fmt.Errorf("failed to listen on gRPC port %d: %w", provider.GRPCPort(), err)
@@ -146,47 +139,46 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = httpListener.Close() }()
 
-	// 8. Create and start server
+	// 6. Create and start server
 	srv := server.New(server.Config{
 		GRPCListener:   grpcListener,
 		HTTPListener:   httpListener,
 		AuthzServer:    authzServer,
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
+		Observer:       logger,
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
 	}
 
-	// 8a. All components initialized — signal readiness via gRPC health service.
-	// Per-service statuses transition from NOT_SERVING to SERVING.
 	srv.SetReady()
 
 	grpcAddr := grpcListener.Addr().String()
 	httpAddr := httpListener.Addr().String()
-	fmt.Println("parsec is running")
-	fmt.Printf("  gRPC (ext_authz):      %s\n", grpcAddr)
-	fmt.Printf("  HTTP (token exchange): http://%s/v1/token\n", httpAddr)
-	fmt.Printf("  HTTP (JWKS):           http://%s/v1/jwks.json\n", httpAddr)
-	fmt.Printf("                         http://%s/.well-known/jwks.json\n", httpAddr)
-	fmt.Printf("  Health (gRPC):         %s (grpc.health.v1.Health)\n", grpcAddr)
-	fmt.Printf("  Health (HTTP live):    http://%s/healthz/live\n", httpAddr)
-	fmt.Printf("  Health (HTTP ready):   http://%s/healthz/ready\n", httpAddr)
-	fmt.Printf("  Trust Domain:          %s\n", provider.TrustDomain())
-	fmt.Printf("  Config:                %s\n", configPath)
+	bootstrapLog.Info().
+		Str("grpc_addr", grpcAddr).
+		Str("http_addr", httpAddr).
+		Str("token_exchange_url", "http://"+httpAddr+"/v1/token").
+		Str("jwks_url", "http://"+httpAddr+"/v1/jwks.json").
+		Str("jwks_wellknown_url", "http://"+httpAddr+"/.well-known/jwks.json").
+		Str("health_grpc", grpcAddr+" (grpc.health.v1.Health)").
+		Str("trust_domain", provider.TrustDomain()).
+		Str("config", configPath).
+		Msg("parsec is running")
 
-	// 9. Wait for interrupt signal
+	// 7. Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	<-sigCh
 
-	fmt.Println("\nShutting down...")
+	bootstrapLog.Info().Msg("Shutting down")
 
-	// 10. Graceful shutdown
+	// 8. Graceful shutdown
 	if err := srv.Stop(ctx); err != nil {
 		return fmt.Errorf("error during shutdown: %w", err)
 	}
 
-	fmt.Println("Shutdown complete")
+	bootstrapLog.Info().Msg("Shutdown complete")
 	return nil
 }
