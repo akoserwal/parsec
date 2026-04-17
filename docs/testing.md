@@ -19,7 +19,7 @@ The only exception is when the code under test itself is necessarily coupled to 
 
 Observability is often untested or awkward to test. Take advantage of the [Domain Oriented Observability](https://martinfowler.com/articles/domain-oriented-observability.html) pattern. We don't need excessive coverage of observability concerns, as these are often tested automatically by virtue of alert rules on metrics. Testing observability is therefore a judgement call on the importance, complexity, and how likely and how quickly a regression is to be caught in production under normal operation. When it is warranted though, this pattern makes it much simpler to do so.
 
-For real world examples in a Go codebase, see [this](https://github.com/project-kessel/parsec/blob/main/internal/service/observability.go) and [this](https://github.com/alechenninger/falcon/blob/main/internal/domain/observer.go).
+For real world examples in a Go codebase, see [this](https://github.com/project-kessel/parsec/blob/main/internal/service/observer.go) and [this](https://github.com/alechenninger/falcon/blob/main/internal/domain/observer.go).
 
 ## Deterministic concurrency
 

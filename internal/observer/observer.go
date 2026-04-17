@@ -15,7 +15,7 @@ import (
 //
 // An Observer value is assignable to any narrower per-package or per-operation
 // observer interface (e.g. service.ServiceObserver, datasource.CacheObserver,
-// keys.RotationObserver) via Go structural typing.
+// keys.DualSlotRotatingSignerObserver) via Go structural typing.
 //
 // Config reload logging is intentionally excluded from the Observer interface.
 type Observer interface {
