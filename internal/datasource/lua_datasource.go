@@ -13,13 +13,13 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-// LuaDataSource executes a Lua script to fetch data
-// The script has access to http, config, and json services
+// LuaDataSource executes a Lua script to fetch data.
+// The script has access to http, config, and json services.
 type LuaDataSource struct {
 	name         string
 	script       string
 	configSource luaservices.ConfigSource
-	httpConfig   luaservices.HTTPServiceConfig
+	httpOpts     []luaservices.HTTPServiceOption
 	observer     LuaObserver
 }
 
@@ -50,7 +50,7 @@ type LuaDataSourceConfig struct {
 	// If nil, default HTTP config (30s timeout, no fixtures) will be used
 	HTTPConfig *luaservices.HTTPServiceConfig
 
-	// Observer for Lua-specific execution events. Must be non-nil.
+	// Observer for Lua-specific execution events. If nil, defaults to NoOpObserver.
 	Observer LuaObserver
 }
 
@@ -80,15 +80,9 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 		return nil, fmt.Errorf("script must define a 'fetch' function")
 	}
 
-	// Build HTTP config with defaults if not provided
-	var httpConfig luaservices.HTTPServiceConfig
+	var httpOpts []luaservices.HTTPServiceOption
 	if config.HTTPConfig != nil {
-		httpConfig = *config.HTTPConfig
-	} else {
-		// Default: 30 second timeout, no fixtures
-		httpConfig = luaservices.HTTPServiceConfig{
-			Timeout: 30 * time.Second,
-		}
+		httpOpts = config.HTTPConfig.Options()
 	}
 
 	obs := config.Observer
@@ -100,7 +94,7 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 		name:         config.Name,
 		script:       config.Script,
 		configSource: config.ConfigSource,
-		httpConfig:   httpConfig,
+		httpOpts:     httpOpts,
 		observer:     obs,
 	}, nil
 }
@@ -112,15 +106,13 @@ func (ds *LuaDataSource) Name() string {
 
 // Fetch executes the Lua script to fetch data
 func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
-	// TODO(RHCLOUD-45xxx): propagate enriched context through Lua HTTP calls
-	// so request IDs and tracing spans are not lost within data sources.
-	_, p := ds.observer.LuaFetchStarted(ctx, ds.name)
+	ctx, p := ds.observer.LuaFetchStarted(ctx, ds.name)
 	defer p.End()
 
 	L := lua.NewState()
 	defer L.Close()
 
-	httpService := luaservices.NewHTTPServiceWithConfig(ds.httpConfig)
+	httpService := luaservices.NewHTTPService(ctx, ds.httpOpts...)
 	httpService.Register(L)
 
 	configService := luaservices.NewConfigService(ds.configSource)
