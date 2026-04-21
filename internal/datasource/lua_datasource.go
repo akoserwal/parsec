@@ -93,7 +93,7 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 
 	obs := config.Observer
 	if obs == nil {
-		obs = NoOpObserver{}
+		obs = NoOpDataSourceObserver{}
 	}
 
 	return &LuaDataSource{
@@ -369,7 +369,7 @@ type CacheableLuaDataSourceConfig struct {
 	HTTPConfig *luaservices.HTTPServiceConfig
 
 	// Observer for Lua-specific execution events on the inner Lua data source.
-	// If nil, NewLuaDataSource substitutes NoOpObserver{}.
+	// If nil, NewLuaDataSource substitutes NoOpDataSourceObserver{}.
 	Observer LuaObserver
 
 	// CacheKeyFunc is the name of the Lua function that generates cache keys

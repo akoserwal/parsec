@@ -65,7 +65,7 @@ type Config struct {
 	ExchangeServer *ExchangeServer
 	JWKSServer     *JWKSServer
 
-	// Observer for server lifecycle events. Defaults to NoOpObserver{} if nil.
+	// Observer for server lifecycle events. Defaults to NoOpServerObserver{} if nil.
 	Observer LifecycleObserver
 }
 
@@ -73,7 +73,7 @@ type Config struct {
 func New(cfg Config) *Server {
 	obs := cfg.Observer
 	if obs == nil {
-		obs = NoOpObserver{}
+		obs = NoOpServerObserver{}
 	}
 	return &Server{
 		grpcListener:    cfg.GRPCListener,
