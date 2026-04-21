@@ -62,7 +62,7 @@ func (NoOp{Op}Probe) End() {}
 
 Observer interfaces mirror the exact component hierarchy of each domain package. There are at least two levels:
 
-1. **Leaf observer** — Named after a specific component (e.g. `DualSlotRotatingSignerObserver`, `AWSKMSProviderObserver`, `JWTValidatorObserver`). Declares the `*Started` methods that component actually calls.
+1. **Leaf observer** — Named after a specific component (e.g. `DualSlotRotatingSignerObserver`, `AWSKMSProviderObserver`, `JWTValidatorObserver`). Declares the `{Op}Started(ctx, ...) (ctx, {Op}Probe)` methods that component actually calls (see Interface Pattern above).
 2. **Package aggregate** — One per domain package (e.g. `KeysObserver`, `TrustObserver`). Embeds all intermediates for that package.
 
 Beyond that, there can be one or more **Intermediate observers**, depending on the depth of the interface hierarchy. If there are any at all, usually there is just one. They are named after the interface a component implements (e.g. `RotatingSignerObserver`, `KeyProviderObserver`, `ValidatorObserver`). Embeds one or more leaf observers, corresponding to the implementations of these interfaces.
