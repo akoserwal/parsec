@@ -58,23 +58,12 @@ func NoOp() Observer {
 	return &noopObserver{}
 }
 
-// Type aliases disambiguate the identical NoOpObserver names from different
-// packages so they can all be embedded anonymously in a single struct.
-type (
-	noopDatasource = datasource.NoOpObserver
-	noopKeys       = keys.NoOpObserver
-	noopTrust      = trust.NoOpObserver
-	noopServer     = server.NoOpObserver
-)
-
-// noopObserver satisfies Observer by embedding per-package NoOp types.
-// All methods are promoted automatically — no hand-written forwarding needed.
 type noopObserver struct {
 	service.NoOpServiceObserver
-	noopDatasource
-	noopKeys
-	noopTrust
-	noopServer
+	datasource.NoOpDataSourceObserver
+	keys.NoOpKeysObserver
+	trust.NoOpTrustObserver
+	server.NoOpServerObserver
 }
 
 // Compile-time check: both implementations satisfy Observer.

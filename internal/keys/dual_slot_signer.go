@@ -79,7 +79,7 @@ type DualSlotRotatingSignerConfig struct {
 	CheckInterval     time.Duration
 	PrepareTimeout    time.Duration // How long to wait before retrying a stuck "preparing" state (default: 1 minute)
 
-	// Observer must be non-nil; use NoOpDualSlotRotatingSignerObserver{} in tests.
+	// Observer is optional; if nil, NoOpDualSlotRotatingSignerObserver{} is used.
 	Observer DualSlotRotatingSignerObserver
 }
 

@@ -174,10 +174,10 @@ type NoOpKeyProviderObserver struct {
 	NoOpInMemoryProviderObserver
 }
 
-// NoOpObserver satisfies KeysObserver with empty probes.
-type NoOpObserver struct {
+// NoOpKeysObserver satisfies KeysObserver with empty probes.
+type NoOpKeysObserver struct {
 	NoOpRotatingSignerObserver
 	NoOpKeyProviderObserver
 }
 
-var _ KeysObserver = NoOpObserver{}
+var _ KeysObserver = NoOpKeysObserver{}
