@@ -46,9 +46,9 @@ type LuaDataSourceConfig struct {
 	// If nil, an empty MapConfigSource will be used
 	ConfigSource luaservices.ConfigSource
 
-	// HTTPConfig provides HTTP service configuration including timeout, fixtures, etc.
-	// If nil, default HTTP config (30s timeout, no fixtures) will be used
-	HTTPConfig *luaservices.HTTPServiceConfig
+	// HTTPOptions provides HTTP service options including timeout, transport, etc.
+	// If nil, default HTTP settings (30s timeout) will be used.
+	HTTPOptions []luaservices.HTTPServiceOption
 
 	// Observer for Lua-specific execution events. If nil, defaults to NoOpObserver.
 	Observer LuaObserver
@@ -80,11 +80,6 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 		return nil, fmt.Errorf("script must define a 'fetch' function")
 	}
 
-	var httpOpts []luaservices.HTTPServiceOption
-	if config.HTTPConfig != nil {
-		httpOpts = config.HTTPConfig.Options()
-	}
-
 	obs := config.Observer
 	if obs == nil {
 		obs = NoOpObserver{}
@@ -94,7 +89,7 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 		name:         config.Name,
 		script:       config.Script,
 		configSource: config.ConfigSource,
-		httpOpts:     httpOpts,
+		httpOpts:     config.HTTPOptions,
 		observer:     obs,
 	}, nil
 }
@@ -356,9 +351,9 @@ type CacheableLuaDataSourceConfig struct {
 	// If nil, an empty MapConfigSource will be used
 	ConfigSource luaservices.ConfigSource
 
-	// HTTPConfig provides HTTP service configuration including timeout, fixtures, etc.
-	// If nil, default HTTP config (30s timeout, no fixtures) will be used
-	HTTPConfig *luaservices.HTTPServiceConfig
+	// HTTPOptions provides HTTP service options including timeout, transport, etc.
+	// If nil, default HTTP settings (30s timeout) will be used.
+	HTTPOptions []luaservices.HTTPServiceOption
 
 	// Observer for Lua-specific execution events on the inner Lua data source.
 	// If nil, NewLuaDataSource substitutes NoOpObserver{}.
@@ -394,7 +389,7 @@ func NewCacheableLuaDataSource(config CacheableLuaDataSourceConfig) (*CacheableL
 		Name:         config.Name,
 		Script:       config.Script,
 		ConfigSource: config.ConfigSource,
-		HTTPConfig:   config.HTTPConfig,
+		HTTPOptions:  config.HTTPOptions,
 		Observer:     config.Observer,
 	})
 	if err != nil {

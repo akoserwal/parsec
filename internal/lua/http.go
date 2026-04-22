@@ -47,38 +47,6 @@ type HTTPService struct {
 	requestOptions RequestOptions
 }
 
-// HTTPServiceConfig configures the HTTP service.
-// Use Options() to convert into functional options for NewHTTPService.
-type HTTPServiceConfig struct {
-	// Timeout for HTTP requests (default: 30s)
-	Timeout time.Duration
-
-	// RequestOptions function to process requests before sending.
-	// Can be used to add authentication, modify headers, etc.
-	RequestOptions RequestOptions
-
-	// Transport is the HTTP transport to use for requests.
-	// If nil, uses http.DefaultTransport.
-	Transport http.RoundTripper
-}
-
-// Options converts the config struct into a slice of HTTPServiceOption,
-// allowing callers to use NewHTTPService(ctx, cfg.Options()...).
-// Timeout is always forwarded so that an explicit zero value (no timeout)
-// is not silently replaced by the constructor's 30s default.
-func (c HTTPServiceConfig) Options() []HTTPServiceOption {
-	opts := []HTTPServiceOption{
-		WithTimeout(c.Timeout),
-	}
-	if c.Transport != nil {
-		opts = append(opts, WithTransport(c.Transport))
-	}
-	if c.RequestOptions != nil {
-		opts = append(opts, WithRequestOptions(c.RequestOptions))
-	}
-	return opts
-}
-
 // NewHTTPService creates a new HTTP service. ctx is required and propagated
 // to every outgoing request, enabling cancellation, tracing, and request-ID
 // propagation. Optional settings are provided via HTTPServiceOption values.
