@@ -51,10 +51,6 @@ type HTTPService struct {
 // to every outgoing request, enabling cancellation, tracing, and request-ID
 // propagation. Optional settings are provided via HTTPServiceOption values.
 func NewHTTPService(ctx context.Context, opts ...HTTPServiceOption) *HTTPService {
-	if ctx == nil {
-		panic("lua.NewHTTPService: ctx must not be nil")
-	}
-
 	cfg := httpServiceConfig{timeout: 30 * time.Second}
 	for _, opt := range opts {
 		opt(&cfg)
