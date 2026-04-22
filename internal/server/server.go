@@ -160,7 +160,9 @@ func (s *Server) Start(ctx context.Context) error {
 	httpMux := http.NewServeMux()
 	httpMux.HandleFunc("GET /healthz/live", s.handleLiveness)
 	httpMux.HandleFunc("GET /healthz/ready", s.handleReadiness)
-	httpMux.Handle("GET /metrics", s.metricsHandler)
+	if s.metricsHandler != nil {
+		httpMux.Handle("GET /metrics", s.metricsHandler)
+	}
 	httpMux.Handle("/", gwMux)
 
 	handler := MetricsHTTPMiddleware(s.meterProvider, httpMux)
