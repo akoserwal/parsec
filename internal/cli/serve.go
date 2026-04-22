@@ -139,7 +139,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = httpListener.Close() }()
 
-	// 6. Create and start server
+	// 6. Build metrics (may be nil when not configured)
+	meterProvider, err := provider.MeterProvider()
+	if err != nil {
+		return fmt.Errorf("failed to build metrics provider: %w", err)
+	}
+
+	metricsHandler, err := provider.MetricsHandler()
+	if err != nil {
+		return fmt.Errorf("failed to build metrics handler: %w", err)
+	}
+
+	// 7. Create and start server
 	srv := server.New(server.Config{
 		GRPCListener:   grpcListener,
 		HTTPListener:   httpListener,
@@ -147,8 +158,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
 		Observer:       obs,
-		MeterProvider:  provider.MeterProvider(),
-		MetricsHandler: provider.MetricsHandler(),
+		MeterProvider:  meterProvider,
+		MetricsHandler: metricsHandler,
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
@@ -169,19 +180,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Str("config", configPath).
 		Msg("parsec is running")
 
-	// 7. Wait for interrupt signal
+	// 8. Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	<-sigCh
 
 	bootstrapLog.Info().Msg("Shutting down")
 
-	// 8. Graceful shutdown
+	// 9. Graceful shutdown
 	//
 	// Flush the MeterProvider before stopping the HTTP server so Prometheus
 	// can perform a final scrape of /metrics while the listener is still open.
-	if mp := provider.MeterProvider(); mp != nil {
-		if err := mp.Shutdown(ctx); err != nil {
+	if meterProvider != nil {
+		if err := meterProvider.Shutdown(ctx); err != nil {
 			bootstrapLog.Warn().Err(err).Msg("MeterProvider shutdown error")
 		}
 	}

@@ -24,6 +24,7 @@ type Provider struct {
 
 	meterProvider  *sdkmetric.MeterProvider
 	metricsHandler http.Handler
+	metricsInitErr error
 	metricsBuilt   bool
 
 	// Lazily constructed components (cached after first call)
@@ -66,14 +67,18 @@ func (p *Provider) Logger() (zerolog.Logger, error) {
 
 // metricsContext lazily builds and caches the MeterProvider and metrics
 // HTTP handler. Returns (nil, nil, nil) when metrics are not configured.
+// Initialization failures are cached so that subsequent calls return the
+// same error without retrying.
 func (p *Provider) metricsContext() (*sdkmetric.MeterProvider, http.Handler, error) {
 	if p.metricsBuilt {
-		return p.meterProvider, p.metricsHandler, nil
+		return p.meterProvider, p.metricsHandler, p.metricsInitErr
 	}
 
 	mp, handler, err := buildMetricsIfConfigured(p.config.Observability)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to build metrics provider: %w", err)
+		p.metricsInitErr = fmt.Errorf("failed to build metrics provider: %w", err)
+		p.metricsBuilt = true
+		return nil, nil, p.metricsInitErr
 	}
 
 	p.meterProvider = mp
@@ -108,17 +113,18 @@ func (p *Provider) Observer() (observer.Observer, error) {
 }
 
 // MeterProvider returns the OTel MeterProvider, or nil if metrics are not
-// configured.
-func (p *Provider) MeterProvider() *sdkmetric.MeterProvider {
-	mp, _, _ := p.metricsContext()
-	return mp
+// configured. Returns a non-nil error when metrics initialization failed.
+func (p *Provider) MeterProvider() (*sdkmetric.MeterProvider, error) {
+	mp, _, err := p.metricsContext()
+	return mp, err
 }
 
 // MetricsHandler returns the HTTP handler for the /metrics endpoint, or nil
-// if metrics are not configured.
-func (p *Provider) MetricsHandler() http.Handler {
-	_, handler, _ := p.metricsContext()
-	return handler
+// if metrics are not configured. Returns a non-nil error when metrics
+// initialization failed.
+func (p *Provider) MetricsHandler() (http.Handler, error) {
+	_, handler, err := p.metricsContext()
+	return handler, err
 }
 
 // TrustStore returns the configured trust store.
