@@ -55,12 +55,12 @@ api:
 # build
 build:
 	$(warning Setting GOEXPERIMENT=strictfipsruntime,boringcrypto - this generally causes builds to fail unless building inside the provided Dockerfile. If building locally, run `make local-build`)
-	mkdir -p bin/ && ${GOENV} GOOS=${GOOS} ${GO} build ${GOBUILDFLAGS} -ldflags "-X cmd.Version=$(VERSION)" -o ./bin/ ./cmd/parsec
+	mkdir -p bin/ && ${GOENV} GOOS=${GOOS} ${GO} build ${GOBUILDFLAGS} -ldflags "-X github.com/project-kessel/parsec/internal/version.Version=$(VERSION)" -o ./bin/ ./cmd/parsec
 
 .PHONY: local-build
 # local-build to ensure FIPS is not enabled which would likely result in a failed build locally
 local-build:
-	mkdir -p bin/ && $(GO) build -ldflags "-X cmd.Version=$(VERSION)" -o ./bin/ ./cmd/parsec
+	mkdir -p bin/ && $(GO) build -ldflags "-X github.com/project-kessel/parsec/internal/version.Version=$(VERSION)" -o ./bin/ ./cmd/parsec
 
 .PHONY: docker-build-push
 docker-build-push:

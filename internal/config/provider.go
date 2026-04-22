@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/rs/zerolog"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/observer"
@@ -20,6 +21,10 @@ type Provider struct {
 
 	logCtx *LoggerContext
 	obs    observer.Observer
+
+	meterProvider  *sdkmetric.MeterProvider
+	metricsHandler http.Handler
+	metricsBuilt   bool
 
 	// Lazily constructed components (cached after first call)
 	trustStore           trust.Store
@@ -59,6 +64,24 @@ func (p *Provider) Logger() (zerolog.Logger, error) {
 	return lc.Logger, nil
 }
 
+// metricsContext lazily builds and caches the MeterProvider and metrics
+// HTTP handler. Returns (nil, nil, nil) when metrics are not configured.
+func (p *Provider) metricsContext() (*sdkmetric.MeterProvider, http.Handler, error) {
+	if p.metricsBuilt {
+		return p.meterProvider, p.metricsHandler, nil
+	}
+
+	mp, handler, err := buildMetricsIfConfigured(p.config.Observability)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to build metrics provider: %w", err)
+	}
+
+	p.meterProvider = mp
+	p.metricsHandler = handler
+	p.metricsBuilt = true
+	return mp, handler, nil
+}
+
 // Observer returns the central observer, lazily created from configuration.
 func (p *Provider) Observer() (observer.Observer, error) {
 	if p.obs != nil {
@@ -70,13 +93,32 @@ func (p *Provider) Observer() (observer.Observer, error) {
 		return nil, err
 	}
 
-	obs, err := NewObserverWithLogger(p.config.Observability, *lc)
+	mp, _, err := p.metricsContext()
+	if err != nil {
+		return nil, err
+	}
+
+	obs, err := newObserverWithMetrics(p.config.Observability, *lc, mp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create observer: %w", err)
 	}
 
 	p.obs = obs
 	return obs, nil
+}
+
+// MeterProvider returns the OTel MeterProvider, or nil if metrics are not
+// configured.
+func (p *Provider) MeterProvider() *sdkmetric.MeterProvider {
+	mp, _, _ := p.metricsContext()
+	return mp
+}
+
+// MetricsHandler returns the HTTP handler for the /metrics endpoint, or nil
+// if metrics are not configured.
+func (p *Provider) MetricsHandler() http.Handler {
+	_, handler, _ := p.metricsContext()
+	return handler
 }
 
 // TrustStore returns the configured trust store.

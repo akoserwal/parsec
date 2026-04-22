@@ -10,6 +10,7 @@ import (
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
@@ -45,6 +46,9 @@ type Server struct {
 	grpcDialOptions []grpc.DialOption
 	observer        LifecycleObserver
 
+	meterProvider  metric.MeterProvider
+	metricsHandler http.Handler
+
 	authzServer    *AuthzServer
 	exchangeServer *ExchangeServer
 	jwksServer     *JWKSServer
@@ -67,6 +71,11 @@ type Config struct {
 
 	// Observer for server lifecycle events. Defaults to NoOpServerObserver{} if nil.
 	Observer LifecycleObserver
+
+	// MeterProvider enables OTel gRPC/HTTP metrics.
+	MeterProvider metric.MeterProvider
+	// MetricsHandler serves the /metrics endpoint.
+	MetricsHandler http.Handler
 }
 
 // New creates a new server with the given configuration.
@@ -80,6 +89,8 @@ func New(cfg Config) *Server {
 		httpListener:    cfg.HTTPListener,
 		grpcDialOptions: cfg.GRPCDialOptions,
 		observer:        obs,
+		meterProvider:   cfg.MeterProvider,
+		metricsHandler:  cfg.MetricsHandler,
 		authzServer:     cfg.AuthzServer,
 		exchangeServer:  cfg.ExchangeServer,
 		jwksServer:      cfg.JWKSServer,
@@ -95,8 +106,12 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("missing HTTP listener")
 	}
 
-	// Create gRPC server
-	s.grpcServer = grpc.NewServer()
+	// Create gRPC server with optional OTel metrics stats handler
+	var grpcOpts []grpc.ServerOption
+	if s.meterProvider != nil {
+		grpcOpts = append(grpcOpts, grpc.StatsHandler(GRPCStatsHandler(s.meterProvider)))
+	}
+	s.grpcServer = grpc.NewServer(grpcOpts...)
 
 	// Register services
 	authv3.RegisterAuthorizationServer(s.grpcServer, s.authzServer)
@@ -145,9 +160,11 @@ func (s *Server) Start(ctx context.Context) error {
 	httpMux := http.NewServeMux()
 	httpMux.HandleFunc("GET /healthz/live", s.handleLiveness)
 	httpMux.HandleFunc("GET /healthz/ready", s.handleReadiness)
+	httpMux.Handle("GET /metrics", s.metricsHandler)
 	httpMux.Handle("/", gwMux)
 
-	s.httpServer = &http.Server{Handler: httpMux}
+	handler := MetricsHTTPMiddleware(s.meterProvider, httpMux)
+	s.httpServer = &http.Server{Handler: handler}
 
 	// All fallible setup is complete. Launch the serve goroutines last so
 	// that an early-return error never orphans a running goroutine.

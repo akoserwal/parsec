@@ -83,7 +83,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 3. Create provider and build components
 	provider := config.NewProvider(cfg)
 
-	logger, err := provider.Observer()
+	obs, err := provider.Observer()
 	if err != nil {
 		return fmt.Errorf("failed to create observer: %w", err)
 	}
@@ -114,11 +114,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// 4. Create service handlers
-	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, logger)
-	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, logger)
+	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, obs)
+	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, obs)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
 		IssuerRegistry: issuerRegistry,
-		Observer:       logger,
+		Observer:       obs,
 	})
 
 	if err := jwksServer.Start(ctx); err != nil {
@@ -146,7 +146,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		AuthzServer:    authzServer,
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
-		Observer:       logger,
+		Observer:       obs,
+		MeterProvider:  provider.MeterProvider(),
+		MetricsHandler: provider.MetricsHandler(),
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
@@ -175,6 +177,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	bootstrapLog.Info().Msg("Shutting down")
 
 	// 8. Graceful shutdown
+	//
+	// Flush the MeterProvider before stopping the HTTP server so Prometheus
+	// can perform a final scrape of /metrics while the listener is still open.
+	if mp := provider.MeterProvider(); mp != nil {
+		if err := mp.Shutdown(ctx); err != nil {
+			bootstrapLog.Warn().Err(err).Msg("MeterProvider shutdown error")
+		}
+	}
+
 	if err := srv.Stop(ctx); err != nil {
 		return fmt.Errorf("error during shutdown: %w", err)
 	}

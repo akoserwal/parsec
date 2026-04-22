@@ -88,9 +88,19 @@ func TestNewObserverWithLogger_CompositeEmpty_ReturnsError(t *testing.T) {
 }
 
 func TestNewObserverWithLogger_UnknownType_ReturnsError(t *testing.T) {
-	_, err := NewObserverWithLogger(&ObservabilityConfig{Type: "prometheus"}, LoggerContext{})
+	_, err := NewObserverWithLogger(&ObservabilityConfig{Type: "unknown_type"}, LoggerContext{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown observability type")
+}
+
+func TestNewObserverWithLogger_PrometheusType_ReturnsRealObserver(t *testing.T) {
+	obs, err := NewObserverWithLogger(&ObservabilityConfig{Type: "prometheus"}, LoggerContext{})
+	require.NoError(t, err)
+	require.NotNil(t, obs)
+
+	ctx, p := obs.TokenIssuanceStarted(context.Background(), nil, nil, "test-scope", nil)
+	assert.NotNil(t, ctx)
+	assert.NotNil(t, p)
 }
 
 // jsonLogCtx builds a LoggerContext that writes JSON to buf.

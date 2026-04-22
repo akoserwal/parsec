@@ -3,13 +3,20 @@ package config
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
+	promexporter "go.opentelemetry.io/otel/exporters/prometheus"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 
 	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/probe"
+	"github.com/project-kessel/parsec/internal/version"
 )
 
 // LoggerContext couples a zerolog logger with its destination writer so
@@ -33,7 +40,23 @@ func NewObserver(cfg *ObservabilityConfig) (observer.Observer, error) {
 // Use this when you want the observer to share a logger with other components.
 // The returned Observer satisfies both ServiceObserver and all infra
 // observer interfaces (cache, keys, trust, JWKS, server lifecycle).
+//
+// If the config includes prometheus (directly or inside a composite), a
+// MeterProvider is created automatically. Use Provider.Observer() when
+// you need the MeterProvider shared with transport-level instrumentation.
 func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (observer.Observer, error) {
+	mp, _, err := buildMetricsIfConfigured(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return newObserverWithMetrics(cfg, logCtx, mp)
+}
+
+// newObserverWithMetrics is the internal constructor that threads a
+// MeterProvider to the "prometheus" observer case. Callers must build
+// the MeterProvider beforehand (via buildMetricsIfConfigured); passing
+// nil when the config includes prometheus is an error.
+func newObserverWithMetrics(cfg *ObservabilityConfig, logCtx LoggerContext, mp *sdkmetric.MeterProvider) (observer.Observer, error) {
 	if cfg == nil {
 		return observer.NoOp(), nil
 	}
@@ -41,13 +64,25 @@ func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (obse
 	switch cfg.Type {
 	case "logging":
 		return newLoggingObserver(cfg, logCtx)
+	case "prometheus":
+		return newPrometheusObserver(mp)
 	case "noop", "":
 		return observer.NoOp(), nil
 	case "composite":
-		return newCompositeObserver(cfg, logCtx)
+		return newCompositeObserver(cfg, logCtx, mp)
 	default:
-		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, composite)", cfg.Type)
+		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, prometheus, composite)", cfg.Type)
 	}
+}
+
+// newPrometheusObserver builds a metrics-only observer from the given
+// MeterProvider. The caller (NewObserverWithLogger or Provider.Observer)
+// is responsible for building the MeterProvider before calling this.
+func newPrometheusObserver(mp *sdkmetric.MeterProvider) (observer.Observer, error) {
+	if mp == nil {
+		return nil, fmt.Errorf("prometheus observer requires a MeterProvider; use Provider.Observer() or supply one via composite config")
+	}
+	return probe.NewMetricsObserver(mp), nil
 }
 
 // NewLogger creates a structured zerolog logger from the observability configuration.
@@ -147,8 +182,9 @@ func NewLoggerContext(cfg *ObservabilityConfig) (LoggerContext, error) {
 }
 
 // newCompositeObserver creates a composite observer that fans out every call
-// (both request-scoped and infra) to all child observers.
-func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (observer.Observer, error) {
+// (both request-scoped and infra) to all child observers. A shared
+// MeterProvider is threaded to any "prometheus" children.
+func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext, mp *sdkmetric.MeterProvider) (observer.Observer, error) {
 	if len(cfg.Observers) == 0 {
 		return nil, fmt.Errorf("composite observer requires at least one sub-observer")
 	}
@@ -159,7 +195,7 @@ func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (obser
 		if err != nil {
 			return nil, fmt.Errorf("observer %d: %w", i, err)
 		}
-		obs, err := NewObserverWithLogger(&subCfg, childLogCtx)
+		obs, err := newObserverWithMetrics(&subCfg, childLogCtx, mp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create observer %d: %w", i, err)
 		}
@@ -260,5 +296,94 @@ func parseLogLevel(levelStr string) (zerolog.Level, error) {
 		return zerolog.ErrorLevel, nil
 	default:
 		return 0, fmt.Errorf("invalid log_level %q (valid: debug, info, warn, error)", levelStr)
+	}
+}
+
+// buildMetricsIfConfigured walks the ObservabilityConfig tree. If a
+// "prometheus" type is found (at the top level or inside a composite),
+// it creates a single shared MeterProvider and promhttp.Handler.
+// Returns (nil, nil, nil) when metrics are not configured.
+func buildMetricsIfConfigured(cfg *ObservabilityConfig) (*sdkmetric.MeterProvider, http.Handler, error) {
+	if !hasPrometheus(cfg) {
+		return nil, nil, nil
+	}
+
+	exporter, err := promexporter.New()
+	if err != nil {
+		return nil, nil, fmt.Errorf("prometheus exporter: %w", err)
+	}
+
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceName("parsec"),
+			semconv.ServiceVersion(version.Version),
+		),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("otel resource: %w", err)
+	}
+
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(exporter),
+		sdkmetric.WithResource(res),
+		sdkmetric.WithView(histogramViews()...),
+	)
+
+	return mp, promhttp.Handler(), nil
+}
+
+// hasPrometheus returns true if cfg (or any composite child) has type "prometheus".
+func hasPrometheus(cfg *ObservabilityConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	if cfg.Type == "prometheus" {
+		return true
+	}
+	for i := range cfg.Observers {
+		if hasPrometheus(&cfg.Observers[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+// histogramViews returns OTel Views that apply custom bucket boundaries
+// for parsec-specific histogram instruments.
+func histogramViews() []sdkmetric.View {
+	requestPathBuckets := []float64{
+		0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5,
+	}
+	cacheBuckets := []float64{
+		0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05,
+	}
+	externalCallBuckets := []float64{
+		0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
+	}
+	shutdownBuckets := []float64{
+		0.1, 0.5, 1, 2.5, 5, 10, 30,
+	}
+
+	mkView := func(namePattern string, boundaries []float64) sdkmetric.View {
+		return sdkmetric.NewView(
+			sdkmetric.Instrument{Name: namePattern},
+			sdkmetric.Stream{Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
+				Boundaries: boundaries,
+			}},
+		)
+	}
+
+	return []sdkmetric.View{
+		mkView("parsec.token.*duration", requestPathBuckets),
+		mkView("parsec.authz.*duration", requestPathBuckets),
+		mkView("parsec.trust.*duration", requestPathBuckets),
+		mkView("parsec.jwt.*duration", requestPathBuckets),
+		mkView("parsec.datasource.cache.duration", cacheBuckets),
+		mkView("parsec.datasource.lua.*duration", externalCallBuckets),
+		mkView("parsec.jwks.*duration", externalCallBuckets),
+		mkView("parsec.key.*duration", externalCallBuckets),
+		mkView("parsec.server.shutdown.duration", shutdownBuckets),
 	}
 }
