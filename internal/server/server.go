@@ -44,6 +44,7 @@ type Server struct {
 	httpListener    net.Listener
 	grpcDialOptions []grpc.DialOption
 	observer        LifecycleObserver
+	metricsHandler  http.Handler
 
 	authzServer    *AuthzServer
 	exchangeServer *ExchangeServer
@@ -67,6 +68,10 @@ type Config struct {
 
 	// Observer for server lifecycle events. Defaults to NoOpServerObserver{} if nil.
 	Observer LifecycleObserver
+
+	// MetricsHandler, when non-nil, is registered on the HTTP mux at GET /metrics
+	// for Prometheus scraping.
+	MetricsHandler http.Handler
 }
 
 // New creates a new server with the given configuration.
@@ -80,6 +85,7 @@ func New(cfg Config) *Server {
 		httpListener:    cfg.HTTPListener,
 		grpcDialOptions: cfg.GRPCDialOptions,
 		observer:        obs,
+		metricsHandler:  cfg.MetricsHandler,
 		authzServer:     cfg.AuthzServer,
 		exchangeServer:  cfg.ExchangeServer,
 		jwksServer:      cfg.JWKSServer,
@@ -145,6 +151,9 @@ func (s *Server) Start(ctx context.Context) error {
 	httpMux := http.NewServeMux()
 	httpMux.HandleFunc("GET /healthz/live", s.handleLiveness)
 	httpMux.HandleFunc("GET /healthz/ready", s.handleReadiness)
+	if s.metricsHandler != nil {
+		httpMux.Handle("GET /metrics", s.metricsHandler)
+	}
 	httpMux.Handle("/", gwMux)
 
 	s.httpServer = &http.Server{Handler: httpMux}

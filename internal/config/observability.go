@@ -8,6 +8,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/project-kessel/parsec/internal/metrics"
 	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/probe"
 )
@@ -34,6 +35,17 @@ func NewObserver(cfg *ObservabilityConfig) (observer.Observer, error) {
 // The returned Observer satisfies both ServiceObserver and all infra
 // observer interfaces (cache, keys, trust, JWKS, server lifecycle).
 func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (observer.Observer, error) {
+	return newObserver(cfg, logCtx, nil)
+}
+
+// NewObserverWithMetrics creates the central observer using the provided logger
+// and an optional metrics.Provider. When the observer type is "metrics" and mp
+// is non-nil, the provider is used to build a metrics-backed observer.
+func NewObserverWithMetrics(cfg *ObservabilityConfig, logCtx LoggerContext, mp *metrics.Provider) (observer.Observer, error) {
+	return newObserver(cfg, logCtx, mp)
+}
+
+func newObserver(cfg *ObservabilityConfig, logCtx LoggerContext, mp *metrics.Provider) (observer.Observer, error) {
 	if cfg == nil {
 		return observer.NoOp(), nil
 	}
@@ -43,11 +55,20 @@ func NewObserverWithLogger(cfg *ObservabilityConfig, logCtx LoggerContext) (obse
 		return newLoggingObserver(cfg, logCtx)
 	case "noop", "":
 		return observer.NoOp(), nil
+	case "metrics":
+		return newMetricsObserver(mp)
 	case "composite":
-		return newCompositeObserver(cfg, logCtx)
+		return newCompositeObserver(cfg, logCtx, mp)
 	default:
-		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, composite)", cfg.Type)
+		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, metrics, composite)", cfg.Type)
 	}
+}
+
+func newMetricsObserver(mp *metrics.Provider) (observer.Observer, error) {
+	if mp == nil {
+		return observer.NoOp(), nil
+	}
+	return metrics.NewObserver(mp)
 }
 
 // NewLogger creates a structured zerolog logger from the observability configuration.
@@ -148,7 +169,7 @@ func NewLoggerContext(cfg *ObservabilityConfig) (LoggerContext, error) {
 
 // newCompositeObserver creates a composite observer that fans out every call
 // (both request-scoped and infra) to all child observers.
-func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (observer.Observer, error) {
+func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext, mp *metrics.Provider) (observer.Observer, error) {
 	if len(cfg.Observers) == 0 {
 		return nil, fmt.Errorf("composite observer requires at least one sub-observer")
 	}
@@ -159,7 +180,7 @@ func newCompositeObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (obser
 		if err != nil {
 			return nil, fmt.Errorf("observer %d: %w", i, err)
 		}
-		obs, err := NewObserverWithLogger(&subCfg, childLogCtx)
+		obs, err := newObserver(&subCfg, childLogCtx, mp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create observer %d: %w", i, err)
 		}

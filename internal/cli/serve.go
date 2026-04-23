@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -139,7 +140,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = httpListener.Close() }()
 
-	// 6. Create and start server
+	// 6. Resolve metrics handler (nil when metrics are disabled)
+	metricsProvider, err := provider.MetricsProvider()
+	if err != nil {
+		return fmt.Errorf("failed to create metrics provider: %w", err)
+	}
+	var metricsHandler http.Handler
+	if metricsProvider != nil {
+		metricsHandler = metricsProvider.Handler()
+		defer func() { _ = metricsProvider.Shutdown(ctx) }()
+	}
+
+	// 7. Create and start server
 	srv := server.New(server.Config{
 		GRPCListener:   grpcListener,
 		HTTPListener:   httpListener,
@@ -147,6 +159,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
 		Observer:       logger,
+		MetricsHandler: metricsHandler,
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
@@ -156,7 +169,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	grpcAddr := grpcListener.Addr().String()
 	httpAddr := httpListener.Addr().String()
-	bootstrapLog.Info().
+	logEvent := bootstrapLog.Info().
 		Str("grpc_addr", grpcAddr).
 		Str("http_addr", httpAddr).
 		Str("token_exchange_url", "http://"+httpAddr+"/v1/token").
@@ -164,17 +177,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Str("jwks_wellknown_url", "http://"+httpAddr+"/.well-known/jwks.json").
 		Str("health_grpc", grpcAddr+" (grpc.health.v1.Health)").
 		Str("trust_domain", provider.TrustDomain()).
-		Str("config", configPath).
-		Msg("parsec is running")
+		Str("config", configPath)
+	if metricsProvider != nil {
+		logEvent = logEvent.Str("metrics_url", "http://"+httpAddr+"/metrics")
+	}
+	logEvent.Msg("parsec is running")
 
-	// 7. Wait for interrupt signal
+	// 8. Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	<-sigCh
 
 	bootstrapLog.Info().Msg("Shutting down")
 
-	// 8. Graceful shutdown
+	// 9. Graceful shutdown
 	if err := srv.Stop(ctx); err != nil {
 		return fmt.Errorf("error during shutdown: %w", err)
 	}

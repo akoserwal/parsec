@@ -7,6 +7,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/project-kessel/parsec/internal/httpfixture"
+	"github.com/project-kessel/parsec/internal/metrics"
 	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
@@ -18,8 +19,11 @@ import (
 type Provider struct {
 	config *Config
 
-	logCtx *LoggerContext
-	obs    observer.Observer
+	logCtx          *LoggerContext
+	obs             observer.Observer
+	metricsProvider *metrics.Provider
+	metricsErr      error
+	metricsBuilt    bool
 
 	// Lazily constructed components (cached after first call)
 	trustStore           trust.Store
@@ -70,7 +74,12 @@ func (p *Provider) Observer() (observer.Observer, error) {
 		return nil, err
 	}
 
-	obs, err := NewObserverWithLogger(p.config.Observability, *lc)
+	mp, err := p.MetricsProvider()
+	if err != nil {
+		return nil, err
+	}
+
+	obs, err := NewObserverWithMetrics(p.config.Observability, *lc, mp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create observer: %w", err)
 	}
@@ -193,6 +202,51 @@ func (p *Provider) TokenService() (*service.TokenService, error) {
 
 	p.tokenService = tokenService
 	return tokenService, nil
+}
+
+// MetricsProvider returns the metrics provider if metrics are enabled.
+// Returns nil when metrics are not configured. The provider is lazily
+// created and cached; a creation error is also cached so callers always
+// see the same result.
+func (p *Provider) MetricsProvider() (*metrics.Provider, error) {
+	if p.metricsBuilt {
+		return p.metricsProvider, p.metricsErr
+	}
+	p.metricsBuilt = true
+
+	if !metricsEnabled(p.config.Observability) {
+		return nil, nil
+	}
+
+	mp, err := metrics.New()
+	if err != nil {
+		p.metricsErr = fmt.Errorf("failed to create metrics provider: %w", err)
+		return nil, p.metricsErr
+	}
+	p.metricsProvider = mp
+	return mp, nil
+}
+
+// metricsEnabled returns true when the observability config uses metrics,
+// either directly or via a composite child.
+func metricsEnabled(cfg *ObservabilityConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	if cfg.Type == "metrics" {
+		return true
+	}
+	if cfg.Metrics != nil && cfg.Metrics.Enabled {
+		return true
+	}
+	if cfg.Type == "composite" {
+		for i := range cfg.Observers {
+			if metricsEnabled(&cfg.Observers[i]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GRPCPort returns the configured gRPC port.

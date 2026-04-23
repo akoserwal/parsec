@@ -88,9 +88,36 @@ func TestNewObserverWithLogger_CompositeEmpty_ReturnsError(t *testing.T) {
 }
 
 func TestNewObserverWithLogger_UnknownType_ReturnsError(t *testing.T) {
-	_, err := NewObserverWithLogger(&ObservabilityConfig{Type: "prometheus"}, LoggerContext{})
+	_, err := NewObserverWithLogger(&ObservabilityConfig{Type: "jaeger"}, LoggerContext{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown observability type")
+}
+
+func TestNewObserverWithMetrics_MetricsType(t *testing.T) {
+	obs, err := NewObserverWithMetrics(&ObservabilityConfig{Type: "metrics"}, LoggerContext{}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, obs)
+
+	ctx := context.Background()
+	_, p := obs.CacheFetchStarted(ctx, "ds")
+	p.CacheHit()
+	p.End()
+}
+
+func TestNewObserverWithMetrics_CompositeWithMetrics(t *testing.T) {
+	obs, err := NewObserverWithMetrics(&ObservabilityConfig{
+		Type: "composite",
+		Observers: []ObservabilityConfig{
+			{Type: "noop"},
+			{Type: "metrics"},
+		},
+	}, LoggerContext{}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, obs)
+
+	ctx := context.Background()
+	_, p := obs.AuthzCheckStarted(ctx)
+	p.End()
 }
 
 // jsonLogCtx builds a LoggerContext that writes JSON to buf.

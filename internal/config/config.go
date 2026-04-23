@@ -340,8 +340,8 @@ type FixtureResponse struct {
 // ObservabilityConfig configures application observability
 type ObservabilityConfig struct {
 	// Type selects the observer implementation
-	// Options: "logging", "noop", "composite"
-	Type string `koanf:"type" usage:"observer type: logging, noop, composite"`
+	// Options: "logging", "noop", "metrics", "composite"
+	Type string `koanf:"type" usage:"observer type: logging, noop, metrics, composite"`
 
 	// LogLevel sets the default log level for logging observer
 	// Options: "debug", "info", "warn", "error"
@@ -365,8 +365,17 @@ type ObservabilityConfig struct {
 	JWKSCache       *EventLoggingConfig `koanf:"jwks_cache"`
 	ServerLifecycle *EventLoggingConfig `koanf:"server_lifecycle"`
 
+	// Metrics configuration for Prometheus/OTel metrics
+	Metrics *MetricsConfig `koanf:"metrics"`
+
 	// Composite observer fields - allows multiple observers
 	Observers []ObservabilityConfig `koanf:"observers"`
+}
+
+// MetricsConfig configures the Prometheus metrics endpoint.
+type MetricsConfig struct {
+	// Enabled controls whether the Prometheus metrics endpoint is active
+	Enabled bool `koanf:"enabled" usage:"enable Prometheus metrics endpoint"`
 }
 
 // EventLoggingConfig configures logging for a specific event type
