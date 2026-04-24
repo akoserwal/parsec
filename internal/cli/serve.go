@@ -84,7 +84,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 3. Create provider and build components
 	provider := config.NewProvider(cfg)
 
-	logger, err := provider.Observer()
+	obs, err := provider.Observer()
 	if err != nil {
 		return fmt.Errorf("failed to create observer: %w", err)
 	}
@@ -115,11 +115,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// 4. Create service handlers
-	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, logger)
-	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, logger)
+	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, obs)
+	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, obs)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
 		IssuerRegistry: issuerRegistry,
-		Observer:       logger,
+		Observer:       obs,
 	})
 
 	if err := jwksServer.Start(ctx); err != nil {
@@ -158,7 +158,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		AuthzServer:    authzServer,
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
-		Observer:       logger,
+		Observer:       obs,
 		MetricsHandler: metricsHandler,
 	})
 	if err := srv.Start(ctx); err != nil {
