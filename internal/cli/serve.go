@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -148,7 +149,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	var metricsHandler http.Handler
 	if metricsProvider != nil {
 		metricsHandler = metricsProvider.Handler()
-		defer func() { _ = metricsProvider.Shutdown(ctx) }()
 	}
 
 	// 7. Create and start server
@@ -191,6 +191,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 	bootstrapLog.Info().Msg("Shutting down")
 
 	// 9. Graceful shutdown
+	// Flush metrics while the HTTP server is still running so Prometheus
+	// can perform a final scrape of the /metrics endpoint.
+	if metricsProvider != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := metricsProvider.Shutdown(shutdownCtx); err != nil {
+			bootstrapLog.Warn().Err(err).Msg("metrics provider shutdown error")
+		}
+	}
+
 	if err := srv.Stop(ctx); err != nil {
 		return fmt.Errorf("error during shutdown: %w", err)
 	}
