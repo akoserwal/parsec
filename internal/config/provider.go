@@ -227,16 +227,13 @@ func (p *Provider) MetricsProvider() (*metrics.Provider, error) {
 	return mp, nil
 }
 
-// metricsEnabled returns true when the observability config uses metrics,
-// either directly or via a composite child.
+// metricsEnabled returns true when the observability config composes a
+// metrics observer, either directly (type: "metrics") or inside a composite.
 func metricsEnabled(cfg *ObservabilityConfig) bool {
 	if cfg == nil {
 		return false
 	}
 	if cfg.Type == "metrics" {
-		return true
-	}
-	if cfg.Metrics != nil && cfg.Metrics.Enabled {
 		return true
 	}
 	if cfg.Type == "composite" {
