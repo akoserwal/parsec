@@ -365,17 +365,8 @@ type ObservabilityConfig struct {
 	JWKSCache       *EventLoggingConfig `koanf:"jwks_cache"`
 	ServerLifecycle *EventLoggingConfig `koanf:"server_lifecycle"`
 
-	// Metrics configuration for Prometheus/OTel metrics
-	Metrics *MetricsConfig `koanf:"metrics"`
-
 	// Composite observer fields - allows multiple observers
 	Observers []ObservabilityConfig `koanf:"observers"`
-}
-
-// MetricsConfig configures the Prometheus metrics endpoint.
-type MetricsConfig struct {
-	// Enabled controls whether the Prometheus metrics endpoint is active
-	Enabled bool `koanf:"enabled" usage:"enable Prometheus metrics endpoint"`
 }
 
 // EventLoggingConfig configures logging for a specific event type
