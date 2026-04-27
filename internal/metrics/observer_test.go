@@ -106,36 +106,42 @@ func TestCacheFetchStarted(t *testing.T) {
 		dataSourceName string
 		action         func(probe datasource.CacheFetchProbe)
 		wantResult     string
+		wantStatus     string
 	}{
 		{
 			name:           "hit",
 			dataSourceName: "inventory",
 			action:         func(p datasource.CacheFetchProbe) { p.CacheHit() },
 			wantResult:     `result="hit"`,
+			wantStatus:     `status="success"`,
 		},
 		{
 			name:           "miss",
 			dataSourceName: "inventory",
 			action:         func(p datasource.CacheFetchProbe) { p.CacheMiss() },
 			wantResult:     `result="miss"`,
+			wantStatus:     `status="success"`,
 		},
 		{
 			name:           "expired",
 			dataSourceName: "inventory",
 			action:         func(p datasource.CacheFetchProbe) { p.CacheExpired() },
 			wantResult:     `result="expired"`,
+			wantStatus:     `status="success"`,
 		},
 		{
 			name:           "error",
 			dataSourceName: "inventory",
 			action:         func(p datasource.CacheFetchProbe) { p.FetchFailed(errors.New("timeout")) },
 			wantResult:     `result="error"`,
+			wantStatus:     `status="error"`,
 		},
 		{
 			name:           "unknown when no outcome is signaled",
 			dataSourceName: "inventory",
 			action:         func(datasource.CacheFetchProbe) {},
 			wantResult:     `result="unknown"`,
+			wantStatus:     `status="success"`,
 		},
 	}
 
@@ -154,6 +160,7 @@ func TestCacheFetchStarted(t *testing.T) {
 			assert.Contains(t, body, "parsec_datasource_cache_fetch_duration_seconds")
 			assert.Contains(t, body, fmt.Sprintf(`datasource="%s"`, tt.dataSourceName))
 			assert.Contains(t, body, tt.wantResult)
+			assert.Contains(t, body, tt.wantStatus)
 		})
 	}
 }

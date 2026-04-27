@@ -87,18 +87,19 @@ type cacheFetchProbe struct {
 func (p *cacheFetchProbe) CacheHit()         { p.result = "hit" }
 func (p *cacheFetchProbe) CacheMiss()        { p.result = "miss" }
 func (p *cacheFetchProbe) CacheExpired()     { p.result = "expired" }
-func (p *cacheFetchProbe) FetchFailed(error) { p.result = "error" }
+func (p *cacheFetchProbe) FetchFailed(error) {
+	p.result = "error"
+	p.markFailed()
+}
 
 func (p *cacheFetchProbe) End() {
 	if p.result == "" {
 		p.result = "unknown"
 	}
-	attrs := metric.WithAttributes(
+	p.record(
 		attribute.String("datasource", p.dataSourceName),
 		attribute.String("result", p.result),
 	)
-	p.counter.Add(context.Background(), 1, attrs)
-	p.histogram.Record(context.Background(), time.Since(p.startTime).Seconds(), attrs)
 }
 
 type luaFetchProbe struct {
