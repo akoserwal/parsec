@@ -1,13 +1,18 @@
 package metrics
 
 import (
+	"net/http"
+
 	"github.com/project-kessel/parsec/internal/observer"
 )
 
 // NewObserver builds a full observer.Observer backed by OTel metrics.
 // The returned observer satisfies all per-package aggregate interfaces
-// and records counters/histograms via the given Provider.
-func NewObserver(p *Provider) (observer.Observer, error) {
+// and records counters/histograms via the given [Provider].
+//
+// The returned observer's Shutdown delegates to p.Shutdown, and its
+// ConfigureHTTPMux registers the Prometheus scrape handler at the given endpoint.
+func NewObserver(p *Provider, endpoint string) (observer.Observer, error) {
 	m := p.Meter(meterName)
 
 	svc, err := newServiceObserver(m)
@@ -28,5 +33,11 @@ func NewObserver(p *Provider) (observer.Observer, error) {
 	}
 	srv := newServerObserver()
 
-	return observer.Compose(svc, ds, ks, ts, srv), nil
+	handler := p.Handler()
+	return observer.Compose(svc, ds, ks, ts, srv,
+		observer.WithShutdown(p.Shutdown),
+		observer.WithHTTPMux(func(mux *http.ServeMux) {
+			mux.Handle("GET "+endpoint, handler)
+		}),
+	), nil
 }

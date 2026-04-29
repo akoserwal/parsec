@@ -67,7 +67,7 @@ Observer interfaces mirror the exact component hierarchy of each domain package.
 
 Beyond that, there can be one or more **Intermediate observers**, depending on the depth of the interface hierarchy. If there are any at all, usually there is just one. They are named after the interface a component implements (e.g. `RotatingSignerObserver`, `KeyProviderObserver`, `ValidatorObserver`). Embeds one or more leaf observers, corresponding to the implementations of these interfaces.
 
-The central `observer.Observer` in `internal/observer/` embeds all package aggregates.
+The central `observer.Observer` in `internal/observer/` embeds all package aggregates and adds infrastructure methods: `Shutdown(context.Context) error` for resource lifecycle and `ConfigureHTTPMux(*http.ServeMux)` for HTTP endpoint registration (e.g. /metrics). These are **not** on the per-package aggregates (that would create ambiguous methods via embedding); they live only on the central interface and cascade through the composite tree.
 
 Example from the `keys` package:
 
@@ -173,11 +173,23 @@ func (s *Service) DoOperation(ctx context.Context, ...) error {
 }
 ```
 
+## Lifecycle
+
+The central `observer.Observer` has two infrastructure methods beyond domain observation:
+
+- `Shutdown(ctx context.Context) error` — flushes and releases resources (e.g. an OTel MeterProvider).
+- `ConfigureHTTPMux(mux *http.ServeMux)` — registers HTTP endpoints the observer needs (e.g. `/metrics` for Prometheus).
+
+`observer.Compose` accepts `WithShutdown(fn)` and `WithHTTPMux(fn)` options to attach these behaviors. `CompositeAll` cascades both to all children. NoOp observers are no-ops.
+
+Neither method is on per-package aggregate interfaces to avoid Go embedding ambiguity.
+
 ## Package Layout
 
 - Observer and probe interfaces live in their domain package (e.g. `keys/observer.go`, `trust/observer.go`)
 - Logging implementations live in `internal/probe/`
 - The central composite and composition logic lives in `internal/observer/`
+- Observer construction dispatch lives in `internal/config.Provider`, not in standalone constructors
 
 ## Key Principles
 

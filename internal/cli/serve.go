@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -141,25 +140,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = httpListener.Close() }()
 
-	// 6. Resolve metrics handler (nil when metrics are disabled)
-	metricsProvider, err := provider.MetricsProvider()
-	if err != nil {
-		return fmt.Errorf("failed to create metrics provider: %w", err)
-	}
-	var metricsHandler http.Handler
-	if metricsProvider != nil {
-		metricsHandler = metricsProvider.Handler()
-	}
-
-	// 7. Create and start server
+	// 6. Create and start server
 	srv := server.New(server.Config{
 		GRPCListener:   grpcListener,
 		HTTPListener:   httpListener,
 		AuthzServer:    authzServer,
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
-		Observer:       obs,
-		MetricsHandler: metricsHandler,
+		Observer:      obs,
+		MuxConfigurer: obs.ConfigureHTTPMux,
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
@@ -167,6 +156,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	srv.SetReady()
 
+	// 7. Log startup information
 	grpcAddr := grpcListener.Addr().String()
 	httpAddr := httpListener.Addr().String()
 	logEvent := bootstrapLog.Info().
@@ -178,8 +168,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Str("health_grpc", grpcAddr+" (grpc.health.v1.Health)").
 		Str("trust_domain", provider.TrustDomain()).
 		Str("config", configPath)
-	if metricsProvider != nil {
-		logEvent = logEvent.Str("metrics_url", "http://"+httpAddr+"/metrics")
+	for k, v := range provider.BootstrapFields() {
+		logEvent = logEvent.Str(k, v)
 	}
 	logEvent.Msg("parsec is running")
 
@@ -191,14 +181,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	bootstrapLog.Info().Msg("Shutting down")
 
 	// 9. Graceful shutdown
-	// Flush metrics while the HTTP server is still running so Prometheus
-	// can perform a final scrape of the /metrics endpoint.
-	if metricsProvider != nil {
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer shutdownCancel()
-		if err := metricsProvider.Shutdown(shutdownCtx); err != nil {
-			bootstrapLog.Warn().Err(err).Msg("metrics provider shutdown error")
-		}
+	// Flush observer resources (e.g. metrics) while the HTTP server is
+	// still running so Prometheus can perform a final scrape.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := obs.Shutdown(shutdownCtx); err != nil {
+		bootstrapLog.Warn().Err(err).Msg("observer shutdown error")
 	}
 
 	if err := srv.Stop(ctx); err != nil {

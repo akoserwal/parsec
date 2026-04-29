@@ -37,14 +37,14 @@ func scrape(t *testing.T, p *Provider) string {
 
 func TestNewObserver_SatisfiesObserverInterface(t *testing.T) {
 	p := testProvider(t)
-	obs, err := NewObserver(p)
+	obs, err := NewObserver(p, "/metrics")
 	require.NoError(t, err)
 	require.NotNil(t, obs)
 }
 
 func TestTokenIssuanceMetrics_Success(t *testing.T) {
 	p := testProvider(t)
-	obs, err := NewObserver(p)
+	obs, err := NewObserver(p, "/metrics")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -59,7 +59,7 @@ func TestTokenIssuanceMetrics_Success(t *testing.T) {
 
 func TestTokenIssuanceMetrics_Error(t *testing.T) {
 	p := testProvider(t)
-	obs, err := NewObserver(p)
+	obs, err := NewObserver(p, "/metrics")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -73,7 +73,7 @@ func TestTokenIssuanceMetrics_Error(t *testing.T) {
 
 func TestTokenExchangeMetrics(t *testing.T) {
 	p := testProvider(t)
-	obs, err := NewObserver(p)
+	obs, err := NewObserver(p, "/metrics")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -87,7 +87,7 @@ func TestTokenExchangeMetrics(t *testing.T) {
 
 func TestAuthzCheckMetrics(t *testing.T) {
 	p := testProvider(t)
-	obs, err := NewObserver(p)
+	obs, err := NewObserver(p, "/metrics")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -148,7 +148,7 @@ func TestCacheFetchStarted(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := testProvider(t)
-			obs, err := NewObserver(p)
+			obs, err := NewObserver(p, "/metrics")
 			require.NoError(t, err)
 
 			_, probe := obs.CacheFetchStarted(context.Background(), tt.dataSourceName)
@@ -167,7 +167,7 @@ func TestCacheFetchStarted(t *testing.T) {
 
 func TestTrustValidationMetrics(t *testing.T) {
 	p := testProvider(t)
-	obs, err := NewObserver(p)
+	obs, err := NewObserver(p, "/metrics")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -181,7 +181,7 @@ func TestTrustValidationMetrics(t *testing.T) {
 
 func TestKeyRotationMetrics(t *testing.T) {
 	p := testProvider(t)
-	obs, err := NewObserver(p)
+	obs, err := NewObserver(p, "/metrics")
 	require.NoError(t, err)
 
 	ctx := context.Background()

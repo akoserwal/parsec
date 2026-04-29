@@ -21,9 +21,12 @@ type Provider struct {
 
 	logCtx          *LoggerContext
 	obs             observer.Observer
-	metricsProvider *metrics.Provider
+	obsErr          error
+	obsBuilt        bool
+	metricsProv     *metrics.Provider
 	metricsErr      error
 	metricsBuilt    bool
+	bootstrapFields map[string]string
 
 	// Lazily constructed components (cached after first call)
 	trustStore           trust.Store
@@ -37,7 +40,10 @@ type Provider struct {
 
 // NewProvider creates a new provider from configuration.
 func NewProvider(config *Config) *Provider {
-	return &Provider{config: config}
+	return &Provider{
+		config:          config,
+		bootstrapFields: make(map[string]string),
+	}
 }
 
 func (p *Provider) loggerContext() (*LoggerContext, error) {
@@ -64,28 +70,108 @@ func (p *Provider) Logger() (zerolog.Logger, error) {
 }
 
 // Observer returns the central observer, lazily created from configuration.
+// Internally constructs all observability resources (logger, metrics provider)
+// and wires them into the appropriate observer implementations.
+// [MuxConfigurers] and [BootstrapFields] may be populated as a side-effect.
 func (p *Provider) Observer() (observer.Observer, error) {
-	if p.obs != nil {
-		return p.obs, nil
+	if p.obsBuilt {
+		return p.obs, p.obsErr
 	}
+	p.obsBuilt = true
 
-	lc, err := p.loggerContext()
+	obs, err := p.buildObserver(p.config.Observability, nil)
 	if err != nil {
-		return nil, err
-	}
-
-	mp, err := p.MetricsProvider()
-	if err != nil {
-		return nil, err
-	}
-
-	obs, err := NewObserverWithMetrics(p.config.Observability, *lc, mp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create observer: %w", err)
+		p.obsErr = fmt.Errorf("failed to create observer: %w", err)
+		return nil, p.obsErr
 	}
 
 	p.obs = obs
 	return obs, nil
+}
+
+// BootstrapFields returns key-value pairs contributed during the
+// bootstrapping phase for inclusion in the startup log event
+// (e.g. metrics_endpoint → /metrics). Any Provider method may
+// contribute fields during component construction.
+func (p *Provider) BootstrapFields() map[string]string {
+	return p.bootstrapFields
+}
+
+// buildObserver recursively constructs an observer from config. parentLogCtx
+// is nil for the root observer and non-nil for composite children.
+func (p *Provider) buildObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerContext) (observer.Observer, error) {
+	if cfg == nil {
+		return observer.NoOp(), nil
+	}
+
+	switch cfg.Type {
+	case "logging":
+		lc, err := p.resolveLogCtx(cfg, parentLogCtx)
+		if err != nil {
+			return nil, err
+		}
+		return newLoggingObserver(cfg, lc)
+
+	case "noop", "":
+		return observer.NoOp(), nil
+
+	case "metrics":
+		mp, err := p.metricsProvider()
+		if err != nil {
+			return nil, err
+		}
+		if mp == nil {
+			return observer.NoOp(), nil
+		}
+		endpoint := "/metrics"
+		p.bootstrapFields["metrics_endpoint"] = endpoint
+		return metrics.NewObserver(mp, endpoint)
+
+	case "composite":
+		return p.buildCompositeObserver(cfg, parentLogCtx)
+
+	default:
+		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, metrics, composite)", cfg.Type)
+	}
+}
+
+func (p *Provider) buildCompositeObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerContext) (observer.Observer, error) {
+	if len(cfg.Observers) == 0 {
+		return nil, fmt.Errorf("composite observer requires at least one sub-observer")
+	}
+
+	lc, err := p.resolveLogCtx(cfg, parentLogCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	var children []observer.Observer
+	for i, subCfg := range cfg.Observers {
+		childLogCtx, err := deriveLoggerContext(lc, &subCfg)
+		if err != nil {
+			return nil, fmt.Errorf("observer %d: %w", i, err)
+		}
+		obs, err := p.buildObserver(&subCfg, &childLogCtx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create observer %d: %w", i, err)
+		}
+		children = append(children, obs)
+	}
+
+	return observer.CompositeAll(children), nil
+}
+
+// resolveLogCtx returns the appropriate LoggerContext for observer
+// construction: the parent override if provided, otherwise the root context.
+func (p *Provider) resolveLogCtx(cfg *ObservabilityConfig, parentLogCtx *LoggerContext) (LoggerContext, error) {
+	if parentLogCtx != nil {
+		return deriveLoggerContext(*parentLogCtx, cfg)
+	}
+	lc, err := p.loggerContext()
+	if err != nil {
+		return LoggerContext{}, err
+	}
+	return *lc, nil
 }
 
 // TrustStore returns the configured trust store.
@@ -204,46 +290,23 @@ func (p *Provider) TokenService() (*service.TokenService, error) {
 	return tokenService, nil
 }
 
-// MetricsProvider returns the metrics provider if metrics are enabled.
-// Returns nil when metrics are not configured. The provider is lazily
-// created and cached; a creation error is also cached so callers always
-// see the same result.
-func (p *Provider) MetricsProvider() (*metrics.Provider, error) {
+// metricsProvider returns the shared metrics provider, lazily created and
+// cached. Returns (nil, nil) when called for a non-metrics observer type;
+// the caller decides whether that's an error. The creation result (including
+// errors) is cached so repeated calls return the same outcome.
+func (p *Provider) metricsProvider() (*metrics.Provider, error) {
 	if p.metricsBuilt {
-		return p.metricsProvider, p.metricsErr
+		return p.metricsProv, p.metricsErr
 	}
 	p.metricsBuilt = true
-
-	if !metricsEnabled(p.config.Observability) {
-		return nil, nil
-	}
 
 	mp, err := metrics.New()
 	if err != nil {
 		p.metricsErr = fmt.Errorf("failed to create metrics provider: %w", err)
 		return nil, p.metricsErr
 	}
-	p.metricsProvider = mp
+	p.metricsProv = mp
 	return mp, nil
-}
-
-// metricsEnabled returns true when the observability config composes a
-// metrics observer, either directly (type: "metrics") or inside a composite.
-func metricsEnabled(cfg *ObservabilityConfig) bool {
-	if cfg == nil {
-		return false
-	}
-	if cfg.Type == "metrics" {
-		return true
-	}
-	if cfg.Type == "composite" {
-		for i := range cfg.Observers {
-			if metricsEnabled(&cfg.Observers[i]) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // GRPCPort returns the configured gRPC port.
