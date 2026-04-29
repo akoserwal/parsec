@@ -84,9 +84,9 @@ type cacheFetchProbe struct {
 	result         string
 }
 
-func (p *cacheFetchProbe) CacheHit()         { p.result = "hit" }
-func (p *cacheFetchProbe) CacheMiss()        { p.result = "miss" }
-func (p *cacheFetchProbe) CacheExpired()     { p.result = "expired" }
+func (p *cacheFetchProbe) CacheHit()     { p.result = "hit" }
+func (p *cacheFetchProbe) CacheMiss()    { p.result = "miss" }
+func (p *cacheFetchProbe) CacheExpired() { p.result = "expired" }
 func (p *cacheFetchProbe) FetchFailed(error) {
 	p.result = "error"
 	p.markFailed()
