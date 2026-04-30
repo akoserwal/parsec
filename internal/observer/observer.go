@@ -119,7 +119,7 @@ type noopObserver struct {
 	server.NoOpServerObserver
 }
 
-func (*noopObserver) Shutdown(context.Context) error { return nil }
+func (*noopObserver) Shutdown(context.Context) error  { return nil }
 func (*noopObserver) ConfigureHTTPMux(*http.ServeMux) {}
 
 // Compile-time check: both implementations satisfy Observer.

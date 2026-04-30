@@ -39,6 +39,7 @@ func newTrustObserver(m metric.Meter) (*trustObserver, error) {
 
 func (o *trustObserver) ValidationStarted(ctx context.Context) (context.Context, trust.ValidationProbe) {
 	return ctx, &validationProbe{metricProbe: metricProbe{
+		ctx:       ctx,
 		counter:   o.validationTotal,
 		histogram: o.validationDuration,
 		startTime: time.Now(),

@@ -16,6 +16,7 @@ const meterName = "github.com/project-kessel/parsec"
 // metricProbe is the shared base for probes that record a counter+histogram
 // pair with a success/error status attribute.
 type metricProbe struct {
+	ctx       context.Context
 	counter   metric.Int64Counter
 	histogram metric.Float64Histogram
 	startTime time.Time
@@ -31,8 +32,8 @@ func (p *metricProbe) record(extraAttrs ...attribute.KeyValue) {
 	}
 	all := append([]attribute.KeyValue{attribute.String("status", status)}, extraAttrs...)
 	attrs := metric.WithAttributes(all...)
-	p.counter.Add(context.Background(), 1, attrs)
-	p.histogram.Record(context.Background(), time.Since(p.startTime).Seconds(), attrs)
+	p.counter.Add(p.ctx, 1, attrs)
+	p.histogram.Record(p.ctx, time.Since(p.startTime).Seconds(), attrs)
 }
 
 // serviceObserver implements service.ServiceObserver using OTel counters and histograms.
@@ -106,6 +107,7 @@ func (o *serviceObserver) TokenIssuanceStarted(
 	_ []service.TokenType,
 ) (context.Context, service.TokenIssuanceProbe) {
 	return ctx, &tokenIssuanceProbe{metricProbe: metricProbe{
+		ctx:       ctx,
 		counter:   o.issuanceTotal,
 		histogram: o.issuanceDuration,
 		startTime: time.Now(),
@@ -120,6 +122,7 @@ func (o *serviceObserver) TokenExchangeStarted(
 	_ string,
 ) (context.Context, service.TokenExchangeProbe) {
 	return ctx, &tokenExchangeProbe{metricProbe: metricProbe{
+		ctx:       ctx,
 		counter:   o.exchangeTotal,
 		histogram: o.exchangeDuration,
 		startTime: time.Now(),
@@ -130,6 +133,7 @@ func (o *serviceObserver) AuthzCheckStarted(
 	ctx context.Context,
 ) (context.Context, service.AuthzCheckProbe) {
 	return ctx, &authzCheckProbe{metricProbe: metricProbe{
+		ctx:       ctx,
 		counter:   o.authzTotal,
 		histogram: o.authzDuration,
 		startTime: time.Now(),

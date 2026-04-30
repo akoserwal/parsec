@@ -58,6 +58,7 @@ func newDataSourceObserver(m metric.Meter) (*dataSourceObserver, error) {
 func (o *dataSourceObserver) CacheFetchStarted(ctx context.Context, dataSourceName string) (context.Context, datasource.CacheFetchProbe) {
 	return ctx, &cacheFetchProbe{
 		metricProbe: metricProbe{
+			ctx:       ctx,
 			counter:   o.cacheFetchTotal,
 			histogram: o.cacheFetchDuration,
 			startTime: time.Now(),
@@ -69,6 +70,7 @@ func (o *dataSourceObserver) CacheFetchStarted(ctx context.Context, dataSourceNa
 func (o *dataSourceObserver) LuaFetchStarted(ctx context.Context, dataSourceName string) (context.Context, datasource.LuaFetchProbe) {
 	return ctx, &luaFetchProbe{
 		metricProbe: metricProbe{
+			ctx:       ctx,
 			counter:   o.luaFetchTotal,
 			histogram: o.luaFetchDuration,
 			startTime: time.Now(),

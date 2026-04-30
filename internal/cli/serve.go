@@ -147,8 +147,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		AuthzServer:    authzServer,
 		ExchangeServer: exchangeServer,
 		JWKSServer:     jwksServer,
-		Observer:      obs,
-		MuxConfigurer: obs.ConfigureHTTPMux,
+		Observer:       obs,
+		MuxConfigurer:  obs.ConfigureHTTPMux,
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)

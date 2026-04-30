@@ -389,4 +389,3 @@ func TestEventLogger_InvalidLogFormat_ReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid log_format")
 }
-

@@ -39,6 +39,7 @@ func newKeysObserver(m metric.Meter) (*keysObserver, error) {
 
 func (o *keysObserver) RotationCheckStarted(ctx context.Context) (context.Context, keys.RotationCheckProbe) {
 	return ctx, &rotationCheckProbe{metricProbe: metricProbe{
+		ctx:       ctx,
 		counter:   o.rotationTotal,
 		histogram: o.rotationDuration,
 		startTime: time.Now(),

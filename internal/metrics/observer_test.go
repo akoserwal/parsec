@@ -17,6 +17,8 @@ import (
 	"github.com/project-kessel/parsec/internal/service"
 )
 
+type ctxKey struct{}
+
 func testProvider(t *testing.T) *Provider {
 	t.Helper()
 	reg := prometheus.NewRegistry()
@@ -192,4 +194,33 @@ func TestKeyRotationMetrics(t *testing.T) {
 	body := scrape(t, p)
 	assert.Contains(t, body, "parsec_keys_rotation_total")
 	assert.Contains(t, body, `status="error"`)
+}
+
+func TestProbeContext_CarriesRequestContext(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	ctx := context.WithValue(context.Background(), ctxKey{}, "request-123")
+
+	_, ip := obs.TokenIssuanceStarted(ctx, nil, nil, "", nil)
+	assert.Equal(t, "request-123", ip.(*tokenIssuanceProbe).ctx.Value(ctxKey{}))
+
+	_, ep := obs.TokenExchangeStarted(ctx, "", "", "", "")
+	assert.Equal(t, "request-123", ep.(*tokenExchangeProbe).ctx.Value(ctxKey{}))
+
+	_, ap := obs.AuthzCheckStarted(ctx)
+	assert.Equal(t, "request-123", ap.(*authzCheckProbe).ctx.Value(ctxKey{}))
+
+	_, cp := obs.CacheFetchStarted(ctx, "ds")
+	assert.Equal(t, "request-123", cp.(*cacheFetchProbe).ctx.Value(ctxKey{}))
+
+	_, lp := obs.LuaFetchStarted(ctx, "ds")
+	assert.Equal(t, "request-123", lp.(*luaFetchProbe).ctx.Value(ctxKey{}))
+
+	_, vp := obs.ValidationStarted(ctx)
+	assert.Equal(t, "request-123", vp.(*validationProbe).ctx.Value(ctxKey{}))
+
+	_, rp := obs.RotationCheckStarted(ctx)
+	assert.Equal(t, "request-123", rp.(*rotationCheckProbe).ctx.Value(ctxKey{}))
 }

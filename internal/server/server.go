@@ -48,8 +48,8 @@ type Server struct {
 	grpcListener    net.Listener
 	httpListener    net.Listener
 	grpcDialOptions []grpc.DialOption
-	observer       LifecycleObserver
-	muxConfigurer  MuxConfigurer
+	observer        LifecycleObserver
+	muxConfigurer   MuxConfigurer
 
 	authzServer    *AuthzServer
 	exchangeServer *ExchangeServer
@@ -93,8 +93,8 @@ func New(cfg Config) *Server {
 		grpcListener:    cfg.GRPCListener,
 		httpListener:    cfg.HTTPListener,
 		grpcDialOptions: cfg.GRPCDialOptions,
-		observer:       obs,
-		muxConfigurer:  muxCfg,
+		observer:        obs,
+		muxConfigurer:   muxCfg,
 		authzServer:     cfg.AuthzServer,
 		exchangeServer:  cfg.ExchangeServer,
 		jwksServer:      cfg.JWKSServer,
