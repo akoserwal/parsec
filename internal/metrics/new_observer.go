@@ -31,7 +31,10 @@ func NewObserver(p *Provider, endpoint string) (observer.Observer, error) {
 	if err != nil {
 		return nil, err
 	}
-	srv := newServerObserver()
+	srv, err := newServerObserver(m)
+	if err != nil {
+		return nil, err
+	}
 
 	handler := p.Handler()
 	return observer.Compose(svc, ds, ks, ts, srv,

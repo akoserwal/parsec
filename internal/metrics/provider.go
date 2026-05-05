@@ -20,7 +20,8 @@ type Provider struct {
 }
 
 type providerConfig struct {
-	registry *prometheus.Registry
+	registry           *prometheus.Registry
+	durationBoundaries []float64
 }
 
 // Option configures the metrics Provider.
@@ -34,6 +35,32 @@ func WithRegistry(r *prometheus.Registry) Option {
 	}
 }
 
+// WithDurationBoundaries overrides the default histogram bucket boundaries
+// applied to all parsec duration histograms (unit "s").
+func WithDurationBoundaries(b []float64) Option {
+	return func(c *providerConfig) {
+		c.durationBoundaries = b
+	}
+}
+
+var defaultDurationBoundaries = []float64{
+	.005, .01, .025, .05, .075, .1, .25, .5, .75, 1, 2.5, 5, 7.5, 10,
+}
+
+// durationView matches parsec histogram instruments with unit "s" and overrides
+// their bucket boundaries to sub-second through multi-second values typical of
+// token issuance, exchange, and trust validation latencies.
+func durationView(boundaries []float64) sdkmetric.View {
+	return sdkmetric.NewView(
+		sdkmetric.Instrument{Kind: sdkmetric.InstrumentKindHistogram, Unit: "s", Name: "parsec.*"},
+		sdkmetric.Stream{
+			Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
+				Boundaries: boundaries,
+			},
+		},
+	)
+}
+
 // New creates a Provider backed by a Prometheus exporter.
 func New(opts ...Option) (*Provider, error) {
 	cfg := &providerConfig{}
@@ -44,6 +71,9 @@ func New(opts ...Option) (*Provider, error) {
 	if cfg.registry == nil {
 		cfg.registry = prometheus.NewRegistry()
 	}
+	if cfg.durationBoundaries == nil {
+		cfg.durationBoundaries = defaultDurationBoundaries
+	}
 
 	exporter, err := promexporter.New(
 		promexporter.WithRegisterer(cfg.registry),
@@ -52,7 +82,10 @@ func New(opts ...Option) (*Provider, error) {
 		return nil, err
 	}
 
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(exporter),
+		sdkmetric.WithView(durationView(cfg.durationBoundaries)),
+	)
 
 	return &Provider{
 		meterProvider: mp,

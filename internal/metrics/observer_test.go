@@ -196,6 +196,278 @@ func TestKeyRotationMetrics(t *testing.T) {
 	assert.Contains(t, body, `status="error"`)
 }
 
+func TestKeyCacheUpdateMetrics_Success(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.KeyCacheUpdateStarted(context.Background())
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_keys_cache_update_total")
+	assert.Contains(t, body, `status="success"`)
+}
+
+func TestKeyCacheUpdateMetrics_Error(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	_, probe := obs.KeyCacheUpdateStarted(ctx)
+	probe.KeyCacheUpdateFailed(errors.New("stale"))
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_keys_cache_update_total")
+	assert.Contains(t, body, "parsec_keys_cache_update_duration_seconds")
+	assert.Contains(t, body, `status="error"`)
+}
+
+func TestJWTValidateMetrics_Success(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.JWTValidateStarted(context.Background(), "test-issuer")
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_trust_jwt_validate_total")
+	assert.Contains(t, body, `issuer="test-issuer"`)
+	assert.Contains(t, body, `status="success"`)
+}
+
+func TestJWTValidateMetrics_Error(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	_, probe := obs.JWTValidateStarted(ctx, "test-issuer")
+	probe.TokenInvalid(errors.New("bad signature"))
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_trust_jwt_validate_total")
+	assert.Contains(t, body, "parsec_trust_jwt_validate_duration_seconds")
+	assert.Contains(t, body, `issuer="test-issuer"`)
+	assert.Contains(t, body, `status="error"`)
+}
+
+func TestForActorFilterMetrics_Success(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.ForActorStarted(context.Background())
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_trust_actor_filter_total")
+	assert.Contains(t, body, `status="success"`)
+}
+
+func TestForActorFilterMetrics_Error(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	_, probe := obs.ForActorStarted(ctx)
+	probe.FilterEvaluationFailed("validator-1", errors.New("eval error"))
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_trust_actor_filter_total")
+	assert.Contains(t, body, "parsec_trust_actor_filter_duration_seconds")
+	assert.Contains(t, body, `status="error"`)
+}
+
+func TestKMSRotateMetrics_Success(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.KMSRotateStarted(context.Background(), "td", "ns", "my-key")
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_keys_kms_rotate_total")
+	assert.Contains(t, body, "parsec_keys_kms_rotate_duration_seconds")
+	assert.Contains(t, body, `key_name="my-key"`)
+	assert.Contains(t, body, `status="success"`)
+}
+
+func TestKMSRotateMetrics_Error(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.KMSRotateStarted(context.Background(), "td", "ns", "my-key")
+	probe.CreateKeyFailed(errors.New("kms error"))
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, `key_name="my-key"`)
+	assert.Contains(t, body, `status="error"`)
+}
+
+func TestDiskRotateMetrics_Success(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.DiskRotateStarted(context.Background(), "td", "ns", "disk-key")
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_keys_disk_rotate_total")
+	assert.Contains(t, body, "parsec_keys_disk_rotate_duration_seconds")
+	assert.Contains(t, body, `key_name="disk-key"`)
+	assert.Contains(t, body, `status="success"`)
+}
+
+func TestDiskRotateMetrics_Error(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.DiskRotateStarted(context.Background(), "td", "ns", "disk-key")
+	probe.KeyWriteFailed(errors.New("disk full"))
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, `key_name="disk-key"`)
+	assert.Contains(t, body, `status="error"`)
+}
+
+func TestMemoryRotateMetrics_Success(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.MemoryRotateStarted(context.Background())
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_keys_memory_rotate_total")
+	assert.Contains(t, body, "parsec_keys_memory_rotate_duration_seconds")
+	assert.Contains(t, body, `status="success"`)
+}
+
+func TestMemoryRotateMetrics_Error(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.MemoryRotateStarted(context.Background())
+	probe.KeyGenerationFailed(errors.New("entropy"))
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_keys_memory_rotate_total")
+	assert.Contains(t, body, `status="error"`)
+}
+
+func TestInitPopulationMetrics_Success(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.InitPopulationStarted(context.Background())
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_server_jwks_init_total")
+	assert.Contains(t, body, "parsec_server_jwks_init_duration_seconds")
+	assert.Contains(t, body, `status="success"`)
+}
+
+func TestInitPopulationMetrics_Error(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.InitPopulationStarted(context.Background())
+	probe.InitialCachePopulationFailed(errors.New("fetch failed"))
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_server_jwks_init_total")
+	assert.Contains(t, body, `status="error"`)
+}
+
+func TestCacheRefreshMetrics_Success(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.CacheRefreshStarted(context.Background())
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_server_jwks_refresh_total")
+	assert.Contains(t, body, "parsec_server_jwks_refresh_duration_seconds")
+	assert.Contains(t, body, `status="success"`)
+}
+
+func TestCacheRefreshMetrics_Error(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	_, probe := obs.CacheRefreshStarted(context.Background())
+	probe.CacheRefreshFailed(errors.New("timeout"))
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_server_jwks_refresh_total")
+	assert.Contains(t, body, `status="error"`)
+}
+
+func TestServeFailedMetrics_GRPC(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	obs.GRPCServeFailed(errors.New("bind error"))
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_server_serve_failed_total")
+	assert.Contains(t, body, `transport="grpc"`)
+}
+
+func TestServeFailedMetrics_HTTP(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	obs.HTTPServeFailed(errors.New("bind error"))
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_server_serve_failed_total")
+	assert.Contains(t, body, `transport="http"`)
+}
+
+func TestLuaFetchMetrics(t *testing.T) {
+	p := testProvider(t)
+	obs, err := NewObserver(p, "/metrics")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	_, probe := obs.LuaFetchStarted(ctx, "enrichment")
+	probe.ScriptExecutionFailed(errors.New("lua panic"))
+	probe.End()
+
+	body := scrape(t, p)
+	assert.Contains(t, body, "parsec_datasource_lua_fetch_total")
+	assert.Contains(t, body, "parsec_datasource_lua_fetch_duration_seconds")
+	assert.Contains(t, body, `datasource="enrichment"`)
+	assert.Contains(t, body, `status="error"`)
+}
+
 func TestProbeContext_CarriesRequestContext(t *testing.T) {
 	p := testProvider(t)
 	obs, err := NewObserver(p, "/metrics")
@@ -223,4 +495,28 @@ func TestProbeContext_CarriesRequestContext(t *testing.T) {
 
 	_, rp := obs.RotationCheckStarted(ctx)
 	assert.Equal(t, "request-123", rp.(*rotationCheckProbe).ctx.Value(ctxKey{}))
+
+	_, kcp := obs.KeyCacheUpdateStarted(ctx)
+	assert.Equal(t, "request-123", kcp.(*keyCacheUpdateProbe).ctx.Value(ctxKey{}))
+
+	_, jp := obs.JWTValidateStarted(ctx, "iss")
+	assert.Equal(t, "request-123", jp.(*jwtValidateProbe).ctx.Value(ctxKey{}))
+
+	_, fp := obs.ForActorStarted(ctx)
+	assert.Equal(t, "request-123", fp.(*forActorProbe).ctx.Value(ctxKey{}))
+
+	_, kmsp := obs.KMSRotateStarted(ctx, "td", "ns", "k")
+	assert.Equal(t, "request-123", kmsp.(*kmsRotateProbe).ctx.Value(ctxKey{}))
+
+	_, dkp := obs.DiskRotateStarted(ctx, "td", "ns", "k")
+	assert.Equal(t, "request-123", dkp.(*diskRotateProbe).ctx.Value(ctxKey{}))
+
+	_, mrp := obs.MemoryRotateStarted(ctx)
+	assert.Equal(t, "request-123", mrp.(*memoryRotateProbe).ctx.Value(ctxKey{}))
+
+	_, ipp := obs.InitPopulationStarted(ctx)
+	assert.Equal(t, "request-123", ipp.(*initPopulationProbe).ctx.Value(ctxKey{}))
+
+	_, crp := obs.CacheRefreshStarted(ctx)
+	assert.Equal(t, "request-123", crp.(*cacheRefreshProbe).ctx.Value(ctxKey{}))
 }
